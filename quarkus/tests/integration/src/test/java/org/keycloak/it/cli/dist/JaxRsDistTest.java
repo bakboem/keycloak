@@ -18,6 +18,7 @@
 package org.keycloak.it.cli.dist;
 
 import org.awaitility.Awaitility;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.keycloak.it.jaxrs.filter.TestFilterTestProvider;
 import org.keycloak.it.junit5.extension.CLIResult;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @DistributionTest(keepAlive = true)
 @RawDistOnly(reason = "Containers are immutable")
+@Tag(DistributionTest.SMOKE)
 public class JaxRsDistTest {
 
     @Test
@@ -45,6 +47,6 @@ public class JaxRsDistTest {
         assertEquals(200, when().get("/").getStatusCode());
 
         Awaitility.await().atMost(5, TimeUnit.SECONDS).untilAsserted(
-                () -> cliResult.assertMessage("Request GET / has context request true has keycloaksession false"));
+                () -> cliResult.assertMessage("Request GET / has context request true has keycloaksession true"));
     }
 }

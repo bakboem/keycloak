@@ -80,7 +80,9 @@ import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.ErrorPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.OAuthGrantPage;
+import org.keycloak.testsuite.pages.RegisterPage;
 import org.keycloak.testsuite.rest.resource.TestingOIDCEndpointsApplicationResource;
+import org.keycloak.testsuite.util.RealmManager;
 import org.keycloak.util.JWKSUtils;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.testsuite.util.OAuthClient;
@@ -123,6 +125,9 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
 
     @Page
     protected AppPage appPage;
+
+    @Page
+    protected RegisterPage registerPage;
 
     @Page
     protected LoginPage loginPage;
@@ -205,8 +210,8 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
         IDToken idToken = sendTokenRequestAndGetIDToken(loginEvent);
 
         // Check that authTime is available and set to current time
-        int authTime = idToken.getAuthTime();
-        int currentTime = Time.currentTime();
+        long authTime = idToken.getAuth_time();
+        long currentTime = Time.currentTime();
         Assert.assertTrue(authTime <= currentTime && authTime + 3 >= currentTime);
 
         // Set time offset
@@ -225,7 +230,7 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
         idToken = sendTokenRequestAndGetIDToken(loginEvent);
 
         // Assert that authTime was updated
-        int authTimeUpdated = idToken.getAuthTime();
+        long authTimeUpdated = idToken.getAuth_time();
         Assert.assertTrue(authTime + 10 <= authTimeUpdated);
     }
 
@@ -238,8 +243,8 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
         IDToken idToken = sendTokenRequestAndGetIDToken(loginEvent);
 
         // Check that authTime is available and set to current time
-        int authTime = idToken.getAuthTime();
-        int currentTime = Time.currentTime();
+        long authTime = idToken.getAuth_time();
+        long currentTime = Time.currentTime();
         Assert.assertTrue(authTime <= currentTime && authTime + 3 >= currentTime);
 
         // Set time offset
@@ -255,7 +260,7 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
         idToken = sendTokenRequestAndGetIDToken(loginEvent);
 
         // Assert that authTime is still the same
-        int authTimeUpdated = idToken.getAuthTime();
+        long authTimeUpdated = idToken.getAuth_time();
         Assert.assertEquals(authTime, authTimeUpdated);
     }
 
@@ -293,7 +298,7 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
 
         EventRepresentation loginEvent = events.expectLogin().detail(Details.USERNAME, "test-user@localhost").assertEvent();
         IDToken idToken = sendTokenRequestAndGetIDToken(loginEvent);
-        int authTime = idToken.getAuthTime();
+        long authTime = idToken.getAuth_time();
 
         // Set time offset
         setTimeOffset(10);
@@ -304,7 +309,7 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
 
         loginEvent = events.expectLogin().removeDetail(Details.USERNAME).assertEvent();
         idToken = sendTokenRequestAndGetIDToken(loginEvent);
-        int authTime2 = idToken.getAuthTime();
+        long authTime2 = idToken.getAuth_time();
 
         Assert.assertEquals(authTime, authTime2);
     }
@@ -383,7 +388,7 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
         IDToken newIdToken = sendTokenRequestAndGetIDToken(loginEvent);
 
         // Assert that authTime wasn't updated
-        Assert.assertEquals(oldIdToken.getAuthTime(), newIdToken.getAuthTime());
+        Assert.assertEquals(oldIdToken.getAuth_time(), newIdToken.getAuth_time());
 
         // Set time offset
         setTimeOffset(20);
@@ -399,11 +404,40 @@ public class OIDCAdvancedRequestParamsTest extends AbstractTestRealmKeycloakTest
         newIdToken = sendTokenRequestAndGetIDToken(loginEvent);
 
         // Assert that authTime was updated
-        Assert.assertTrue("Expected auth time to change. old auth time: " + oldIdToken.getAuthTime() + " , new auth time: " + newIdToken.getAuthTime(),
-                oldIdToken.getAuthTime() + 20 <= newIdToken.getAuthTime());
+        Assert.assertTrue("Expected auth time to change. old auth time: " + oldIdToken.getAuth_time() + " , new auth time: " + newIdToken.getAuth_time(),
+                oldIdToken.getAuth_time() + 20 <= newIdToken.getAuth_time());
 
         // Assert userSession didn't change
         Assert.assertEquals(oldIdToken.getSessionState(), newIdToken.getSessionState());
+    }
+
+    // prompt=create
+    @Test
+    public void promptCreate() {
+
+        // Assert registration page with prompt=login
+        driver.navigate().to(oauth.getLoginFormUrl() + "&prompt=create");
+        registerPage.assertCurrent();
+    }
+
+    // prompt=create
+    @Test
+    public void promptCreateShouldFailWhenRegistrationsAreDisabled() {
+
+        RealmRepresentation realmRep = adminClient.realm("test").toRepresentation();
+        Boolean registrationAllowed = realmRep.isRegistrationAllowed();
+        realmRep.setRegistrationAllowed(false);
+        adminClient.realm("test").update(realmRep);
+
+        // Assert registration page with prompt=login
+        try {
+            driver.navigate().to(oauth.getLoginFormUrl() + "&prompt=create");
+            errorPage.assertCurrent();
+            assertTrue(errorPage.getError().contains("Registration not allowed"));
+        } finally {
+            realmRep.setRegistrationAllowed(registrationAllowed);
+            adminClient.realm("test").update(realmRep);
+        }
     }
 
     // prompt=consent

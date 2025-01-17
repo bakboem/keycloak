@@ -25,34 +25,28 @@ import org.keycloak.component.ComponentValidationException;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
-import org.keycloak.protocol.oid4vc.model.Format;
+import org.keycloak.protocol.oid4vc.OID4VCEnvironmentProviderFactory;
 import org.keycloak.provider.ConfigurationValidationHelper;
-import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.provider.ProviderConfigurationBuilder;
-
-import java.time.Clock;
 
 /**
  * Provider Factory to create {@link  VerifiableCredentialsSigningService}s
  *
  * @author <a href="https://github.com/wistefan">Stefan Wiedemann</a>
  */
-public interface VCSigningServiceProviderFactory extends ComponentFactory<VerifiableCredentialsSigningService, VerifiableCredentialsSigningService>, EnvironmentDependentProviderFactory {
+public interface VCSigningServiceProviderFactory extends ComponentFactory<VerifiableCredentialsSigningService, VerifiableCredentialsSigningService>, OID4VCEnvironmentProviderFactory {
 
-    /**
-     * Key for the realm attribute providing the issuerDidy.
-     */
-    String ISSUER_DID_REALM_ATTRIBUTE_KEY = "issuerDid";
-    
-    public static ProviderConfigurationBuilder configurationBuilder() {
+    static ProviderConfigurationBuilder configurationBuilder() {
         return ProviderConfigurationBuilder.create()
-                .property(SigningProperties.KEY_ID.asConfigProperty());
+                // I do believe the ALGORITHM_TYPE need to be mandatory instead. As the keyId might change with key rotation.
+                // If keyId is not set, service can always work with active key.
+                .property(SigningProperties.ALGORITHM_TYPE.asConfigProperty());
     }
 
     @Override
     default void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model) throws ComponentValidationException {
         ConfigurationValidationHelper.check(model)
-                .checkRequired(SigningProperties.KEY_ID.asConfigProperty());
+                .checkRequired(SigningProperties.ALGORITHM_TYPE.asConfigProperty());
         validateSpecificConfiguration(session, realm, model);
     }
 
@@ -77,11 +71,6 @@ public interface VCSigningServiceProviderFactory extends ComponentFactory<Verifi
         return Profile.isFeatureEnabled(Profile.Feature.OID4VC_VCI);
     }
 
-    @Override
-    default boolean isSupported() {
-        return Profile.isFeatureEnabled(Profile.Feature.OID4VC_VCI);
-    }
-
     /**
      * Should validate potential implementation specific configuration of the factory.
      */
@@ -92,5 +81,5 @@ public interface VCSigningServiceProviderFactory extends ComponentFactory<Verifi
      *
      * @return the format
      */
-    Format supportedFormat();
+    String supportedFormat();
 }

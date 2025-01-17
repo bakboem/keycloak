@@ -30,6 +30,7 @@ import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.Constants;
+import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.models.utils.SystemClientUtil;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
@@ -160,9 +161,33 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         String username = "login-test";
         String resetUri = oauth.AUTH_SERVER_ROOT + "/realms/test/login-actions/reset-credentials";
 
-        openResetPasswordUrlAndDoFlow(resetUri, "account", oauth.AUTH_SERVER_ROOT + "/realms/test/account/");
+        openResetPasswordUrlAndDoFlow(resetUri, "account", oauth.AUTH_SERVER_ROOT + "/realms/test/account/", false);
 
         AccountHelper.logout(testRealm(), username);
+        WaitUtils.waitForPageToLoad();
+
+        TestAppHelper testAppHelper = new TestAppHelper(oauth, loginPage, appPage);
+        testAppHelper.login(username, "resetPassword");
+
+        appPage.assertCurrent();
+
+        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+    }
+
+    @Test
+    public void resetPasswordLoggedUser() throws IOException {
+        String username = "login-test";
+        loginPage.open();
+        loginPage.login(username, "password");
+
+        events.expectLogin().user(userId).detail(Details.USERNAME, username).assertEvent();
+
+        String resetUri = oauth.AUTH_SERVER_ROOT + "/realms/test/login-actions/reset-credentials";
+
+        openResetPasswordUrlAndDoFlow(resetUri, "account", oauth.AUTH_SERVER_ROOT + "/realms/test/account/", true);
+
+        AccountHelper.logout(testRealm(), username);
+        WaitUtils.waitForPageToLoad();
 
         TestAppHelper testAppHelper = new TestAppHelper(oauth, loginPage, appPage);
         testAppHelper.login(username, "resetPassword");
@@ -173,13 +198,14 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
     }
 
     // Starts by opening "reset-password-url". Then go through the successful reset-password flow for the particular user. After user confirms new password, this method ends.
-    private void openResetPasswordUrlAndDoFlow(String resetUri, String expectedClientId, String expectedRedirectUri) throws IOException {
+    private void openResetPasswordUrlAndDoFlow(String resetUri, String expectedClientId, String expectedRedirectUri, boolean userAuthenticated) throws IOException {
         String username = "login-test";
         driver.navigate().to(resetUri);
 
-        resetPasswordPage.assertCurrent();
-
-        resetPasswordPage.changePassword(username);
+        if (!userAuthenticated) {
+            resetPasswordPage.assertCurrent();
+            resetPasswordPage.changePassword(username);
+        }
 
         loginPage.assertCurrent();
         assertEquals("You should receive an email shortly with further instructions.", loginPage.getSuccessMessage());
@@ -207,9 +233,25 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
 
         updatePasswordPage.assertCurrent();
 
+        if(userAuthenticated) {
+            updatePasswordPage.uncheckLogoutSessions();
+        }
+
         updatePasswordPage.changePassword("resetPassword", "resetPassword");
 
         event = events.expectRequiredAction(EventType.UPDATE_PASSWORD)
+                .detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE)
+                .client(expectedClientId)
+                .user(userId).detail(Details.USERNAME, username);
+        if (expectedRedirectUri != null) {
+            event.detail(Details.REDIRECT_URI,  expectedRedirectUri);
+        } else {
+            event.removeDetail(Details.REDIRECT_URI);
+        }
+        event.assertEvent();
+
+        event = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE)
                 .client(expectedClientId)
                 .user(userId).detail(Details.USERNAME, username);
         if (expectedRedirectUri != null) {
@@ -224,7 +266,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
     public void resetPasswordLinkTestAppWithoutRedirectUriParam() throws IOException {
         String resetUri = oauth.AUTH_SERVER_ROOT + "/realms/test/login-actions/reset-credentials?client_id=test-app";
 
-        openResetPasswordUrlAndDoFlow(resetUri, "test-app", null);
+        openResetPasswordUrlAndDoFlow(resetUri, "test-app", null, false);
 
         // Link "Back to application" with the baseUrl of client "test-app"
         infoPage.assertCurrent();
@@ -239,7 +281,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
     public void resetPasswordLinkTestAppWithRedirectUriParam() throws IOException {
         String resetUri = oauth.AUTH_SERVER_ROOT + "/realms/test/login-actions/reset-credentials?client_id=test-app&redirect_uri=" + oauth.getRedirectUri();
 
-        openResetPasswordUrlAndDoFlow(resetUri, "test-app", oauth.getRedirectUri());
+        openResetPasswordUrlAndDoFlow(resetUri, "test-app", oauth.getRedirectUri(), false);
 
         // Should be directly redirected to "application because of "redirect_uri" parameter
         appPage.assertCurrent();
@@ -347,6 +389,16 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         resetPassword("login@test.com");
     }
 
+    @Test
+    public void resetPasswordBackButton() throws IOException, MessagingException {
+        loginPage.open();
+        loginPage.login("login@test.com", "wrongpassword");
+        loginPage.resetPassword();
+        resetPasswordPage.assertCurrent();
+        driver.navigate().back();
+        loginPage.assertCurrent();
+    }
+
     private String resetPassword(String username) throws IOException, MessagingException {
         return resetPassword(username, "resetPassword");
     }
@@ -375,7 +427,8 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
 
         updatePasswordPage.changePassword(password, password);
 
-        events.expectRequiredAction(EventType.UPDATE_PASSWORD).user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
+        events.expectRequiredAction(EventType.UPDATE_PASSWORD).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
+        events.expectRequiredAction(EventType.UPDATE_CREDENTIAL).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).detail(Details.USERNAME, username.trim()).assertEvent();
 
         assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
@@ -426,7 +479,8 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
 
         updatePasswordPage.assertCurrent();
         assertEquals(error, updatePasswordPage.getError());
-        events.expectRequiredAction(EventType.UPDATE_PASSWORD_ERROR).error(Errors.PASSWORD_REJECTED).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
+        events.expectRequiredAction(EventType.UPDATE_CREDENTIAL_ERROR).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).error(Errors.PASSWORD_REJECTED).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
+        events.expectRequiredAction(EventType.UPDATE_PASSWORD_ERROR).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).error(Errors.PASSWORD_REJECTED).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
     }
 
     private void initiateResetPasswordFromResetPasswordPage(String username) {
@@ -434,7 +488,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         loginPage.resetPassword();
 
         resetPasswordPage.assertCurrent();
-        
+
         resetPasswordPage.changePassword(username);
 
         loginPage.assertCurrent();
@@ -1001,11 +1055,13 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
 
         assertEquals("Invalid password: minimum length 8.", resetPasswordPage.getErrorMessage());
 
-        events.expectRequiredAction(EventType.UPDATE_PASSWORD_ERROR).error(Errors.PASSWORD_REJECTED).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
+        events.expectRequiredAction(EventType.UPDATE_CREDENTIAL_ERROR).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).error(Errors.PASSWORD_REJECTED).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
+        events.expectRequiredAction(EventType.UPDATE_PASSWORD_ERROR).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).error(Errors.PASSWORD_REJECTED).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
 
         updatePasswordPage.changePassword("resetPasswordWithPasswordPolicy", "resetPasswordWithPasswordPolicy");
 
-        events.expectRequiredAction(EventType.UPDATE_PASSWORD).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
+        events.expectRequiredAction(EventType.UPDATE_PASSWORD).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
+        events.expectRequiredAction(EventType.UPDATE_CREDENTIAL).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).detail(Details.USERNAME, "login-test").assertEvent().getSessionId();
 
         assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
@@ -1030,12 +1086,12 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void resetPasswordBeforeUserIsDisabled() throws IOException, MessagingException {
         initiateResetPasswordFromResetPasswordPage("login-test");
-        
+
         assertEquals(1, greenMail.getReceivedMessages().length);
         MimeMessage message = greenMail.getReceivedMessages()[0];
         String changePasswordUrl = MailUtils.getPasswordResetEmailLink(message);
         events.expectRequiredAction(EventType.SEND_RESET_PASSWORD).session((String)null).user(userId).detail(Details.USERNAME, "login-test").detail(Details.EMAIL, "login@test.com").assertEvent();
-        
+
         UserRepresentation user = findUser("login-test");
         user.setEnabled(false);
         updateUser(user);
@@ -1314,7 +1370,7 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
         newPassword.sendKeys("resetPassword");
         final WebElement confirmPassword = driver.findElement(By.id("password-confirm"));
         confirmPassword.sendKeys("resetPassword");
-        final WebElement submit = driver.findElement(By.cssSelector("input[type=\"submit\"]"));
+        final WebElement submit = driver.findElement(By.cssSelector("button[type=\"submit\"]"));
 
         submit.click();
     }
@@ -1358,6 +1414,12 @@ public class ResetPasswordTest extends AbstractTestRealmKeycloakTest {
             changePasswordOnUpdatePage(driver);
 
             events.expectRequiredAction(EventType.UPDATE_PASSWORD)
+                    .detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE)
+                    .detail(Details.REDIRECT_URI, redirectUri)
+                    .client(clientId)
+                    .user(user.getId()).detail(Details.USERNAME, user.getUsername()).assertEvent();
+            events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                    .detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE)
                     .detail(Details.REDIRECT_URI, redirectUri)
                     .client(clientId)
                     .user(user.getId()).detail(Details.USERNAME, user.getUsername()).assertEvent();

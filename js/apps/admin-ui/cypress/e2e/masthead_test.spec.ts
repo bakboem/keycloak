@@ -2,11 +2,12 @@ import LoginPage from "../support/pages/LoginPage";
 import SidebarPage from "../support/pages/admin-ui/SidebarPage";
 import Masthead from "../support/pages/admin-ui/Masthead";
 import { keycloakBefore } from "../support/util/keycloak_hooks";
+import adminClient from "../support/util/AdminClient";
 
 const loginPage = new LoginPage();
 const masthead = new Masthead();
 const sidebarPage = new SidebarPage();
-const helpLabel = ".pf-c-form__group-label-help";
+const helpLabel = ".pf-v5-c-form__group-label-help";
 
 describe("Masthead tests", () => {
   beforeEach(() => {
@@ -31,7 +32,7 @@ describe("Masthead tests", () => {
     it("Go to realm info", () => {
       sidebarPage.goToClients();
       masthead.toggleUsernameDropdown().clickRealmInfo();
-      cy.get(".pf-l-grid").should("contain.text", "Welcome");
+      cy.get(".pf-v5-l-grid").should("contain.text", "Welcome");
     });
 
     it("Should go to documentation page", () => {
@@ -64,6 +65,47 @@ describe("Masthead tests", () => {
     });
   });
 
+  describe("Login works for unprivileged users", () => {
+    const realmName = `test-realm-${crypto.randomUUID()}`;
+    const username = `test-user-${crypto.randomUUID()}`;
+
+    before(async () => {
+      await adminClient.createRealm(realmName, { enabled: true });
+
+      await adminClient.inRealm(realmName, () =>
+        adminClient.createUser({
+          username,
+          enabled: true,
+          emailVerified: true,
+          credentials: [{ type: "password", value: "test" }],
+          firstName: "Test",
+          lastName: "User",
+          email: "test@keycloak.org",
+        }),
+      );
+    });
+
+    after(() => adminClient.deleteRealm(realmName));
+
+    it("Login without privileges to see admin console", () => {
+      sidebarPage.waitForPageLoad();
+      masthead.signOut();
+
+      cy.visit(`/admin/${realmName}/console`);
+
+      cy.get('[role="progressbar"]').should("not.exist");
+      cy.get("#username").type(username);
+      cy.get("#password").type("test");
+
+      cy.get("#kc-login").click();
+
+      sidebarPage.waitForPageLoad();
+      masthead.signOut();
+      sidebarPage.waitForPageLoad();
+      loginPage.isLogInPage();
+    });
+  });
+
   describe("Mobile view", () => {
     it("Mobile menu is shown when in mobile view", () => {
       cy.viewport("samsung-s10");
@@ -81,7 +123,7 @@ describe("Masthead tests", () => {
     });
   });
 
-  describe.skip("Accessibility tests for masthead", () => {
+  describe("Accessibility tests for masthead", () => {
     beforeEach(() => {
       loginPage.logIn();
       keycloakBefore();

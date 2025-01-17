@@ -31,12 +31,8 @@
     <name>Auth Server Services - Testsuite Providers</name>
 
     <properties>
-        <js-adapter.version>${project.version}</js-adapter.version>
-        <js-adapter.file.path>${project.basedir}/target/classes/javascript</js-adapter.file.path>
-        <maven.compiler.plugin.version>3.8.1</maven.compiler.plugin.version>
-        <maven.compiler.release>17</maven.compiler.release>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <js-adapter.dist.path>${project.basedir}/../../../../../../js/libs/keycloak-js/lib</js-adapter.dist.path>
+        <js-adapter.target.path>${project.basedir}/target/classes/javascript</js-adapter.target.path>
     </properties>
 
     <dependencies>
@@ -86,21 +82,11 @@
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-core-jakarta</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.infinispan</groupId>
-            <artifactId>infinispan-client-hotrod-jakarta</artifactId>
+            <artifactId>infinispan-core</artifactId>
         </dependency>
         <dependency>
             <groupId>org.infinispan</groupId>
             <artifactId>infinispan-tasks-api</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.infinispan</groupId>
-                    <artifactId>infinispan-core</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
     </dependencies>
 
@@ -125,25 +111,24 @@
 
         <plugins>
             <plugin>
-                <artifactId>maven-dependency-plugin</artifactId>
+                <artifactId>maven-resources-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>unpack-javascript-adapter</id>
+                        <id>copy-keycloak-js</id>
                         <phase>generate-resources</phase>
                         <goals>
-                            <goal>unpack</goal>
+                            <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <artifactItems>
-                                <artifactItem>
-                                    <groupId>org.keycloak</groupId>
-                                    <artifactId>keycloak-js-adapter-jar</artifactId>
-                                    <version>${js-adapter.version}</version>
-                                    <type>jar</type>
-                                    <outputDirectory>${js-adapter.file.path}</outputDirectory>
-                                </artifactItem>
-                            </artifactItems>
-                            <includes>keycloak.js</includes>
+                            <outputDirectory>${js-adapter.target.path}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${js-adapter.dist.path}</directory>
+                                    <includes>
+                                        <include>keycloak.js</include>
+                                    </includes>
+                                </resource>
+                            </resources>
                         </configuration>
                     </execution>
                 </executions>

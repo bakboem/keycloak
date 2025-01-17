@@ -36,9 +36,10 @@ describe("Realm settings - User registration tab", () => {
 
   it("Add admin role", () => {
     const role = "admin";
+    const roleType = "roles";
     userRegistration.addRole();
     sidebarPage.waitForPageLoad();
-    userRegistration.selectRow(role).assign();
+    userRegistration.changeRoleTypeFilter(roleType).selectRow(role).assign();
     masthead.checkNotificationMessage("Associated roles have been added");
     listingPage.searchItem(role, false).itemExist(role);
 
@@ -57,7 +58,7 @@ describe("Realm settings - User registration tab", () => {
       .checkModalMessage("Are you sure you want to remove this role?")
       .checkConfirmButtonText("Remove")
       .confirmModal();
-    masthead.checkNotificationMessage("Scope mapping successfully removed");
+    masthead.checkNotificationMessage("Role mapping updated");
   });
 
   it("Add default group", () => {

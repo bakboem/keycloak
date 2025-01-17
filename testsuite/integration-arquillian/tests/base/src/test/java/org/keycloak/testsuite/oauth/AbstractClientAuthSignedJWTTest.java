@@ -27,6 +27,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -68,7 +69,6 @@ import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
-import org.keycloak.adapters.AdapterUtils;
 import org.keycloak.admin.client.resource.ClientAttributeCertificateResource;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.authentication.authenticators.client.JWTClientAuthenticator;
@@ -86,7 +86,6 @@ import org.keycloak.common.util.KeystoreUtil.KeystoreFormat;
 import org.keycloak.constants.ServiceUrlConstants;
 import org.keycloak.crypto.Algorithm;
 import org.keycloak.crypto.ECDSAAlgorithm;
-import org.keycloak.crypto.ECDSASignatureProvider;
 import org.keycloak.crypto.KeyType;
 import org.keycloak.crypto.SignatureSignerContext;
 import org.keycloak.events.Details;
@@ -101,6 +100,7 @@ import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.JsonWebToken;
 import org.keycloak.representations.KeyStoreConfig;
 import org.keycloak.representations.RefreshToken;
+import org.keycloak.representations.idm.CertificateRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
@@ -477,9 +477,14 @@ public abstract class AbstractClientAuthSignedJWTTest extends AbstractKeycloakTe
             final String publicKeyNew = client.getAttributes().get(JWTClientAuthenticator.ATTR_PREFIX + "." + CertificateInfoHelper.PUBLIC_KEY);
             assertEquals("Certificates don't match", pem, publicKeyNew);
         } else if (keystoreFormat.equals(org.keycloak.services.resources.admin.ClientAttributeCertificateResource.JSON_WEB_KEY_SET)) {
-            final String publicKeyNew = client.getAttributes().get(JWTClientAuthenticator.ATTR_PREFIX + "." + CertificateInfoHelper.PUBLIC_KEY);
+            Assert.assertEquals("true", client.getAttributes().get(OIDCConfigAttributes.USE_JWKS_STRING));
+            String jwks = new String(Files.readAllBytes(keystoreFile.toPath()));
+            Assert.assertEquals(jwks, client.getAttributes().get(OIDCConfigAttributes.JWKS_STRING));
+            CertificateRepresentation info = getClient(testRealm.getRealm(), client.getId())
+                    .getCertficateResource(JWTClientAuthenticator.ATTR_PREFIX).getKeyInfo();
+            Assert.assertNotNull(info.getPublicKey());
             // Just assert it's valid public key
-            PublicKey pk = KeycloakModelUtils.getPublicKey(publicKeyNew);
+            PublicKey pk = KeycloakModelUtils.getPublicKey(info.getPublicKey());
             Assert.assertNotNull(pk);
         } else if (keystoreFormat.equals(org.keycloak.services.resources.admin.ClientAttributeCertificateResource.CERTIFICATE_PEM)) {
             String pem = new String(Files.readAllBytes(keystoreFile.toPath()));
@@ -715,7 +720,7 @@ public abstract class AbstractClientAuthSignedJWTTest extends AbstractKeycloakTe
         CloseableHttpClient client = new DefaultHttpClient();
         try {
             HttpPost post = new HttpPost(requestUrl);
-            UrlEncodedFormEntity formEntity = new UrlEncodedFormEntity(parameters, "UTF-8");
+            UrlEncodedFormEntity formEntity = new UrlEncodedFormEntity(parameters, StandardCharsets.UTF_8);
             post.setEntity(formEntity);
             return client.execute(post);
         } finally {
@@ -801,15 +806,15 @@ public abstract class AbstractClientAuthSignedJWTTest extends AbstractKeycloakTe
         @Override
         protected JsonWebToken createRequestToken(String clientId, String realmInfoUrl) {
             JsonWebToken reqToken = new JsonWebToken();
-            if (isClaimEnabled("id")) reqToken.id(AdapterUtils.generateId());
+            if (isClaimEnabled("id")) reqToken.id(KeycloakModelUtils.generateId());
             if (isClaimEnabled("issuer")) reqToken.issuer(clientId);
             if (isClaimEnabled("subject")) reqToken.subject(clientId);
             if (isClaimEnabled("audience")) reqToken.audience(realmInfoUrl);
 
-            int now = Time.currentTime();
-            if (isClaimEnabled("issuedAt")) reqToken.issuedAt(now);
-            if (isClaimEnabled("expiration")) reqToken.expiration(now + getTokenTimeout());
-            if (isClaimEnabled("notBefore")) reqToken.notBefore(now);
+            long now = Time.currentTime();
+            if (isClaimEnabled("issuedAt")) reqToken.iat(now);
+            if (isClaimEnabled("expiration")) reqToken.exp(now + getTokenTimeout());
+            if (isClaimEnabled("notBefore")) reqToken.nbf(now);
 
             return reqToken;
         }
@@ -929,15 +934,15 @@ public abstract class AbstractClientAuthSignedJWTTest extends AbstractKeycloakTe
 
     protected JsonWebToken createRequestToken(String clientId, String realmInfoUrl) {
         JsonWebToken reqToken = new JsonWebToken();
-        reqToken.id(AdapterUtils.generateId());
+        reqToken.id(KeycloakModelUtils.generateId());
         reqToken.issuer(clientId);
         reqToken.subject(clientId);
         reqToken.audience(realmInfoUrl);
 
-        int now = Time.currentTime();
-        reqToken.issuedAt(now);
-        reqToken.expiration(now + 10);
-        reqToken.notBefore(now);
+        long now = Time.currentTime();
+        reqToken.iat(now);
+        reqToken.exp(now + 10);
+        reqToken.nbf(now);
 
         return reqToken;
     }

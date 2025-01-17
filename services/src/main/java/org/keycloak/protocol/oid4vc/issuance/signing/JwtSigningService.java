@@ -21,15 +21,12 @@ import org.jboss.logging.Logger;
 import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.crypto.SignatureProvider;
 import org.keycloak.crypto.SignatureSignerContext;
-import org.keycloak.jose.jws.JWSBuilder;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.protocol.oid4vc.issuance.TimeProvider;
-import org.keycloak.protocol.oid4vc.model.VerifiableCredential;
-import org.keycloak.representations.JsonWebToken;
-
-import java.net.URI;
-import java.util.Optional;
-import java.util.UUID;
+import org.keycloak.protocol.oid4vc.issuance.VCIssuanceContext;
+import org.keycloak.protocol.oid4vc.issuance.VCIssuerException;
+import org.keycloak.protocol.oid4vc.issuance.credentialbuilder.CredentialBody;
+import org.keycloak.protocol.oid4vc.issuance.credentialbuilder.JwtCredentialBody;
+import org.keycloak.protocol.oid4vc.model.Format;
 
 /**
  * {@link VerifiableCredentialsSigningService} implementing the JWT_VC format. It returns a string, containing the
@@ -42,22 +39,13 @@ public class JwtSigningService extends SigningService<String> {
 
     private static final Logger LOGGER = Logger.getLogger(JwtSigningService.class);
 
-    private static final String ID_TEMPLATE = "urn:uuid:%s";
-    private static final String TOKEN_TYPE = "JWT";
-    private static final String VC_CLAIM_KEY = "vc";
-    private static final String ID_CLAIM_KEY = "id";
-
 
     private final SignatureSignerContext signatureSignerContext;
-    private final TimeProvider timeProvider;
-    private final String tokenType;
-    protected final String issuerDid;
 
-    public JwtSigningService(KeycloakSession keycloakSession, String keyId, String algorithmType, String tokenType, String issuerDid, TimeProvider timeProvider) {
-        super(keycloakSession, keyId, algorithmType);
-        this.issuerDid = issuerDid;
-        this.timeProvider = timeProvider;
-        this.tokenType = tokenType;
+
+    public JwtSigningService(KeycloakSession keycloakSession, String keyId, String algorithmType) {
+        super(keycloakSession, keyId, Format.JWT_VC, algorithmType);
+
         KeyWrapper signingKey = getKey(keyId, algorithmType);
         if (signingKey == null) {
             throw new SigningServiceException(String.format("No key for id %s and algorithm %s available.", keyId, algorithmType));
@@ -69,46 +57,14 @@ public class JwtSigningService extends SigningService<String> {
     }
 
     @Override
-    public String signCredential(VerifiableCredential verifiableCredential) {
+    public String signCredential(VCIssuanceContext vcIssuanceContext) {
         LOGGER.debugf("Sign credentials to jwt-vc format.");
 
-        // Get the issuance date from the credential. Since nbf is mandatory, we set it to the current time if not
-        // provided
-        long iat = Optional.ofNullable(verifiableCredential.getIssuanceDate())
-                .map(issuanceDate -> issuanceDate.toInstant().getEpochSecond())
-                .orElse((long) timeProvider.currentTimeSeconds());
+        CredentialBody credentialBody = vcIssuanceContext.getCredentialBody();
+        if (!(credentialBody instanceof JwtCredentialBody jwtCredentialBody)) {
+            throw new VCIssuerException("Credential body unexpectedly not of type JwtCredentialBody");
+        }
 
-        // set mandatory fields
-        JsonWebToken jsonWebToken = new JsonWebToken()
-                .issuer(verifiableCredential.getIssuer().toString())
-                .nbf(iat)
-                .id(createCredentialId(verifiableCredential));
-        jsonWebToken.setOtherClaims(VC_CLAIM_KEY, verifiableCredential);
-
-        // expiry is optional
-        Optional.ofNullable(verifiableCredential.getExpirationDate())
-                .ifPresent(d -> jsonWebToken.exp(d.toInstant().getEpochSecond()));
-
-        // subject id should only be set if the credential subject has an id.
-        Optional.ofNullable(
-                        verifiableCredential
-                                .getCredentialSubject()
-                                .getClaims()
-                                .get(ID_CLAIM_KEY))
-                .map(Object::toString)
-                .ifPresent(jsonWebToken::subject);
-
-        return new JWSBuilder()
-                .type(tokenType)
-                .jsonContent(jsonWebToken)
-                .sign(signatureSignerContext);
-    }
-
-    // retrieve the credential id from the given VC or generate one.
-    static String createCredentialId(VerifiableCredential verifiableCredential) {
-        return Optional.ofNullable(
-                        verifiableCredential.getId())
-                .orElse(URI.create(String.format(ID_TEMPLATE, UUID.randomUUID())))
-                .toString();
+        return jwtCredentialBody.sign(signatureSignerContext);
     }
 }

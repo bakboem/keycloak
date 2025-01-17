@@ -27,8 +27,10 @@ import org.keycloak.OAuth2Constants;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
+import org.keycloak.events.email.EmailEventListenerProviderFactory;
 import org.keycloak.models.Constants;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.models.utils.TimeBasedOTP;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
@@ -44,13 +46,17 @@ import org.keycloak.testsuite.pages.LoginPasswordResetPage;
 import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.pages.LoginTotpPage;
 import org.keycloak.testsuite.pages.RegisterPage;
+import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
 import org.keycloak.testsuite.util.GreenMailRule;
 import org.keycloak.testsuite.util.MailUtils;
 import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.RealmRepUtil;
 import org.keycloak.testsuite.util.UserBuilder;
 
+import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import org.keycloak.testsuite.util.WaitUtils;
+
 import java.net.MalformedURLException;
 import java.util.*;
 
@@ -96,18 +102,19 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
 
     private int lifespan;
 
-    private static final Integer failureFactor= 2;
+    private static final Integer failureFactor = 2;
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
         UserRepresentation user = RealmRepUtil.findUser(testRealm, "test-user@localhost");
-        UserBuilder.edit(user).totpSecret("totpSecret");
+        UserBuilder.edit(user).totpSecret("totpSecret").emailVerified(true);
 
         testRealm.setBruteForceProtected(true);
+        testRealm.setBruteForceStrategy(RealmRepresentation.BruteForceStrategy.MULTIPLE);
         testRealm.setFailureFactor(failureFactor);
-        testRealm.setMaxDeltaTimeSeconds(20);
+        testRealm.setMaxDeltaTimeSeconds(60);
         testRealm.setMaxFailureWaitSeconds(100);
-        testRealm.setWaitIncrementSeconds(5);
+        testRealm.setWaitIncrementSeconds(20);
         testRealm.setOtpPolicyCodeReusable(true);
         //testRealm.setQuickLoginCheckMilliSeconds(0L);
 
@@ -123,10 +130,11 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
             clearUserFailures();
             clearAllUserFailures();
             RealmRepresentation realm = adminClient.realm("test").toRepresentation();
+            realm.setBruteForceStrategy(RealmRepresentation.BruteForceStrategy.MULTIPLE);
             realm.setFailureFactor(failureFactor);
-            realm.setMaxDeltaTimeSeconds(20);
+            realm.setMaxDeltaTimeSeconds(60);
             realm.setMaxFailureWaitSeconds(100);
-            realm.setWaitIncrementSeconds(5);
+            realm.setWaitIncrementSeconds(20);
             realm.setOtpPolicyCodeReusable(true);
             adminClient.realm("test").update(realm);
         } catch (Exception e) {
@@ -149,7 +157,6 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
             realm.setMaxDeltaTimeSeconds(60 * 60 * 12); // 12 hours
             realm.setFailureFactor(30);
             adminClient.realm("test").update(realm);
-            testingClient.testing().setTimeOffset(Collections.singletonMap("offset", String.valueOf(0)));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -376,13 +383,13 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
             assertUserNumberOfFailures(user.getId(), failureFactor);
 
             events.clear();
-         } finally {
-             realm.setPermanentLockout(false);
-             testRealm().update(realm);
-             UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
-             user.setEnabled(true);
-             updateUser(user);
-         }
+        } finally {
+            realm.setPermanentLockout(false);
+            testRealm().update(realm);
+            UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+            user.setEnabled(true);
+            updateUser(user);
+        }
     }
 
     @Test
@@ -403,6 +410,51 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
     }
 
     @Test
+    public void testFailureResetForTemporaryLockout() throws Exception {
+        RealmRepresentation realm = testRealm().toRepresentation();
+        try {
+            realm.setMaxDeltaTimeSeconds(5);
+            testRealm().update(realm);
+            loginInvalidPassword();
+
+            //Wait for brute force executor to process the login and then wait for delta time
+            WaitUtils.waitForBruteForceExecutors(testingClient);
+            setTimeOffset(5);
+
+            loginInvalidPassword();
+            loginSuccess();
+        } finally {
+            realm.setMaxDeltaTimeSeconds(20);
+            testRealm().update(realm);
+        }
+    }
+
+    @Test
+    public void testNoFailureResetForPermanentLockout() throws Exception {
+        RealmRepresentation realm = testRealm().toRepresentation();
+        try {
+            realm.setMaxDeltaTimeSeconds(5);
+            realm.setPermanentLockout(true);
+            testRealm().update(realm);
+            loginInvalidPassword();
+
+            //Wait for brute force executor to process the login and then wait for delta time
+            WaitUtils.waitForBruteForceExecutors(testingClient);
+            setTimeOffset(5);
+
+            loginInvalidPassword();
+            expectPermanentlyDisabled();
+        } finally {
+            realm.setPermanentLockout(false);
+            realm.setMaxDeltaTimeSeconds(20);
+            testRealm().update(realm);
+            UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+            user.setEnabled(true);
+            updateUser(user);
+        }
+    }
+
+    @Test
     public void testWait() throws Exception {
         loginSuccess();
         loginInvalidPassword();
@@ -412,13 +464,62 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
 
         // KEYCLOAK-5420
         // Test to make sure that temporarily disabled doesn't increment failure count
-        testingClient.testing().setTimeOffset(Collections.singletonMap("offset", String.valueOf(6)));
+        setTimeOffset(21);
         // should be unlocked now
         loginSuccess();
         clearUserFailures();
         clearAllUserFailures();
         loginSuccess();
-        testingClient.testing().setTimeOffset(Collections.singletonMap("offset", String.valueOf(0)));
+    }
+
+    @Test
+    public void testByMultipleStrategy() throws Exception {
+
+        try {
+            UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+            loginSuccess();
+            loginInvalidPassword();
+            loginInvalidPassword();
+            expectTemporarilyDisabled();
+            assertUserNumberOfFailures(user.getId(), 2);
+            this.setTimeOffset(30);
+
+            loginInvalidPassword();
+            assertUserNumberOfFailures(user.getId(), 3);
+            this.setTimeOffset(60);
+            loginSuccess();
+        } finally {
+            this.resetTimeOffset();
+        }
+    }
+
+    @Test
+    public void testLinearStrategy() throws Exception {
+        RealmRepresentation realm = testRealm().toRepresentation();
+        UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+        try {
+            realm.setBruteForceStrategy(RealmRepresentation.BruteForceStrategy.LINEAR);
+            testRealm().update(realm);
+
+            loginSuccess();
+
+            loginInvalidPassword();
+            loginInvalidPassword();
+            expectTemporarilyDisabled();
+            assertUserNumberOfFailures(user.getId(), 2);
+            this.setTimeOffset(30);
+
+            loginInvalidPassword();
+            assertUserNumberOfFailures(user.getId(), 3);
+            this.setTimeOffset(60);
+            expectTemporarilyDisabled();
+
+        } finally {
+            realm.setPermanentLockout(false);
+            realm.setBruteForceStrategy(RealmRepresentation.BruteForceStrategy.MULTIPLE);
+            testRealm().update(realm);
+            this.resetTimeOffset();
+        }
     }
 
     @Test
@@ -476,12 +577,63 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
         assertUserDisabledEvent(Errors.INVALID_AUTHENTICATION_SESSION);
     }
 
+    private void checkEmailPresent(String subject) {
+        Assert.assertFalse("No email with subject: " + subject, Arrays.stream(greenMail.getReceivedMessages()).filter(m -> {
+            try {
+                return subject.equals(m.getSubject());
+            } catch (MessagingException ex) {
+                return false;
+            }
+        }).findAny().isEmpty());
+    }
+
     @Test
-    public void testPermanentLockout() {
+    public void testPermanentLockout() throws Exception {
+        testingClient.testing().addEventsToEmailEventListenerProvider(Collections.singletonList(EventType.USER_DISABLED_BY_PERMANENT_LOCKOUT));
+        try (RealmAttributeUpdater updater = new RealmAttributeUpdater(testRealm()).setPermanentLockout(true)
+                .addEventsListener(EmailEventListenerProviderFactory.ID).update()) {
+            // act
+            loginInvalidPassword("test-user@localhost");
+            loginInvalidPassword("test-user@localhost", false);
+
+            // As of now, there are two events: USER_DISABLED_BY_PERMANENT_LOCKOUT and LOGIN_ERROR but Order is not
+            // guarantee though since the brute force detector is running separately "in its own thread" named
+            // "Brute Force Protector".
+            List<EventRepresentation> actualEvents = Arrays.asList(events.poll(), events.poll(5));
+            assertIsContained(events.expect(EventType.USER_DISABLED_BY_PERMANENT_LOCKOUT).client((String) null).detail(Details.REASON, "brute_force_attack detected"), actualEvents);
+            assertIsContained(events.expect(EventType.LOGIN_ERROR).error(Errors.INVALID_USER_CREDENTIALS), actualEvents);
+
+            checkEmailPresent("User disabled by permament lockout");
+
+            // assert
+            expectPermanentlyDisabled();
+
+            UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+            assertFalse(user.isEnabled());
+            assertUserDisabledReason(BruteForceProtector.DISABLED_BY_PERMANENT_LOCKOUT);
+
+            user.setEnabled(true);
+            updateUser(user);
+            assertUserDisabledReason(null);
+        } finally {
+            testingClient.testing().removeEventsToEmailEventListenerProvider(Collections.singletonList(EventType.USER_DISABLED_BY_PERMANENT_LOCKOUT));
+            UserRepresentation user = testRealm().users().search("test-user@localhost", 0, 1).get(0);
+            user.setEnabled(true);
+            updateUser(user);
+        }
+    }
+
+    // https://github.com/keycloak/keycloak/issues/30969
+    @Test
+    public void testPermanentLockoutWithTempLockoutParamsSet()
+    {
         RealmRepresentation realm = testRealm().toRepresentation();
         try {
             // arrange
+            realm.setWaitIncrementSeconds(0);
             realm.setPermanentLockout(true);
+            realm.setMaxTemporaryLockouts(0);
+            realm.setQuickLoginCheckMilliSeconds(0L);
             testRealm().update(realm);
 
             // act
@@ -491,7 +643,7 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
             // As of now, there are two events: USER_DISABLED_BY_PERMANENT_LOCKOUT and LOGIN_ERROR but Order is not
             // guarantee though since the brute force detector is running separately "in its own thread" named
             // "Brute Force Protector".
-            List<EventRepresentation> actualEvents = Arrays.asList(events.poll(), events.poll());
+            List<EventRepresentation> actualEvents = Arrays.asList(events.poll(), events.poll(5));
             assertIsContained(events.expect(EventType.USER_DISABLED_BY_PERMANENT_LOCKOUT).client((String) null).detail(Details.REASON, "brute_force_attack detected"), actualEvents);
             assertIsContained(events.expect(EventType.LOGIN_ERROR).error(Errors.INVALID_USER_CREDENTIALS), actualEvents);
 
@@ -516,12 +668,20 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
 
     @Test
     public void testTemporaryLockout() throws Exception {
-        loginInvalidPassword("test-user@localhost");
-        loginInvalidPassword("test-user@localhost", false);
+        testingClient.testing().addEventsToEmailEventListenerProvider(Collections.singletonList(EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT));
+        try (RealmAttributeUpdater updater = new RealmAttributeUpdater(testRealm())
+                .addEventsListener(EmailEventListenerProviderFactory.ID).update()) {
+            loginInvalidPassword("test-user@localhost");
+            loginInvalidPassword("test-user@localhost", false);
 
-        List<EventRepresentation> actualEvents = Arrays.asList(events.poll(), events.poll());
-        assertIsContained(events.expect(EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT).client((String) null).detail(Details.REASON, "brute_force_attack detected"), actualEvents);
-        assertIsContained(events.expect(EventType.LOGIN_ERROR).error(Errors.INVALID_USER_CREDENTIALS), actualEvents);
+            List<EventRepresentation> actualEvents = Arrays.asList(events.poll(), events.poll(5));
+            assertIsContained(events.expect(EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT).client((String) null).detail(Details.REASON, "brute_force_attack detected"), actualEvents);
+            assertIsContained(events.expect(EventType.LOGIN_ERROR).error(Errors.INVALID_USER_CREDENTIALS), actualEvents);
+
+            checkEmailPresent("User disabled by temporary lockout");
+        } finally {
+            testingClient.testing().removeEventsToEmailEventListenerProvider(Collections.singletonList(EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT));
+        }
     }
 
     @Test
@@ -535,11 +695,11 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
             loginInvalidPassword();
             loginInvalidPassword();
             expectTemporarilyDisabled();
-            testingClient.testing().setTimeOffset(Collections.singletonMap("offset", String.valueOf(6)));
+            setTimeOffset(21);
 
             loginInvalidPassword();
             expectTemporarilyDisabled();
-            testingClient.testing().setTimeOffset(Collections.singletonMap("offset", String.valueOf(11)));
+            setTimeOffset(42);
 
             loginInvalidPassword();
             expectPermanentlyDisabled();
@@ -564,7 +724,7 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
             loginInvalidPassword();
             loginInvalidPassword();
             expectTemporarilyDisabled();
-            testingClient.testing().setTimeOffset(Collections.singletonMap("offset", String.valueOf(6)));
+            setTimeOffset(21);
             UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
             Map<String, Object> status = adminClient.realm("test").attackDetection().bruteForceUserStatus(user.getId());
             assertEquals(1, status.get("numTemporaryLockouts"));
@@ -664,7 +824,8 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
 
         updatePasswordPage.updatePasswords("password", "password");
 
-        events.expectRequiredAction(EventType.UPDATE_PASSWORD).user(userId).assertEvent();
+        events.expectRequiredAction(EventType.UPDATE_PASSWORD).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).assertEvent();
+        events.expectRequiredAction(EventType.UPDATE_CREDENTIAL).detail(Details.CREDENTIAL_TYPE, PasswordCredentialModel.TYPE).user(userId).assertEvent();
 
         userRepresentation = testRealm().users().get(userId).toRepresentation();
         assertTrue(userRepresentation.isEnabled());
@@ -676,6 +837,87 @@ public class BruteForceTest extends AbstractTestRealmKeycloakTest {
         appPage.logout(idTokenHint);
 
         events.clear();
+    }
+
+    @Test
+    public void testRaceAttackTemporaryLockout() throws Exception {
+        RealmRepresentation realm = testRealm().toRepresentation();
+        UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+        try {
+            realm.setWaitIncrementSeconds(120);
+            realm.setQuickLoginCheckMilliSeconds(120000L);
+            testRealm().update(realm);
+            clearUserFailures();
+            clearAllUserFailures();
+            user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+            user.setEnabled(true);
+            testRealm().users().get(user.getId()).update(user);
+            String totpSecret = totp.generateTOTP("totpSecret");
+            OAuthClient.AccessTokenResponse response = getTestToken("password", totpSecret);
+            Assert.assertNotNull(response.getAccessToken());
+            raceAttack(user);
+        } finally {
+            realm.setWaitIncrementSeconds(5);
+            realm.setQuickLoginCheckMilliSeconds(100L);
+            testRealm().update(realm);
+            user.setEnabled(true);
+            updateUser(user);
+        }
+    }
+
+    @Test
+    public void testRaceAttackPermanentLockout() throws Exception {
+        RealmRepresentation realm = testRealm().toRepresentation();
+        UserRepresentation user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+        try {
+            realm.setPermanentLockout(true);
+            testRealm().update(realm);
+            raceAttack(user);
+            clearUserFailures();
+            clearAllUserFailures();
+            user = adminClient.realm("test").users().search("test-user@localhost", 0, 1).get(0);
+            user.setEnabled(true);
+            testRealm().users().get(user.getId()).update(user);
+            String totpSecret = totp.generateTOTP("totpSecret");
+            OAuthClient.AccessTokenResponse response = getTestToken("password", totpSecret);
+            Assert.assertNotNull(response.getAccessToken());
+        } finally {
+            realm.setPermanentLockout(false);
+            testRealm().update(realm);
+            user.setEnabled(true);
+            updateUser(user);
+        }
+    }
+
+    private void raceAttack(UserRepresentation user) throws Exception {
+        int num = 100;
+        LoginThread[] threads = new LoginThread[num];
+        for (int i = 0; i < num; ++i) {
+            threads[i] = new LoginThread();
+        }
+        for (int i = 0; i < num; ++i) {
+            threads[i].start();
+        }
+        for (int i = 0; i < num; ++i) {
+            threads[i].join();
+        }
+        int invalidCount =  (int) adminClient.realm("test").attackDetection().bruteForceUserStatus(user.getId()).get("numFailures");
+        assertTrue("Invalid count should be less than or equal 3 but was: " + invalidCount, invalidCount <= 3);
+    }
+
+    public class LoginThread extends Thread {
+
+        public void run() {
+            try {
+                String totpSecret = totp.generateTOTP("totpSecret");
+                OAuthClient.AccessTokenResponse response = getTestToken("invalid", totpSecret);
+                Assert.assertNull(response.getAccessToken());
+                Assert.assertEquals(response.getError(), "invalid_grant");
+                Assert.assertEquals(response.getErrorDescription(), "Invalid user credentials");
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        }
     }
 
     public void expectTemporarilyDisabled() {

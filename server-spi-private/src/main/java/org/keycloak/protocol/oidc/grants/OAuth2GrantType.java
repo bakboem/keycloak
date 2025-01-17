@@ -22,7 +22,9 @@ import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 import org.keycloak.common.ClientConnection;
 import org.keycloak.events.EventBuilder;
@@ -33,7 +35,6 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.provider.Provider;
-import org.keycloak.representations.dpop.DPoP;
 import org.keycloak.services.cors.Cors;
 
 /**
@@ -49,6 +50,14 @@ public interface OAuth2GrantType extends Provider {
      * @return event type
      */
     EventType getEventType();
+
+    /**
+     * @return request parameters, which can be duplicated for the particular grant type. The grant request is typically rejected if
+     * request contains multiple values of some parameter, which is not listed here
+     */
+    default Set<String> getSupportedMultivaluedRequestParameters() {
+        return Collections.emptySet();
+    }
 
     /**
      * Processes grant request.
@@ -72,10 +81,9 @@ public interface OAuth2GrantType extends Provider {
         protected EventBuilder event;
         protected Cors cors;
         protected Object tokenManager;
-        protected DPoP dPoP;
 
         public Context(KeycloakSession session, Object clientConfig, Map<String, String> clientAuthAttributes,
-                MultivaluedMap<String, String> formParams, EventBuilder event, Cors cors, Object tokenManager, DPoP dPoP) {
+                MultivaluedMap<String, String> formParams, EventBuilder event, Cors cors, Object tokenManager) {
             this.session = session;
             this.realm = session.getContext().getRealm();
             this.client = session.getContext().getClient();
@@ -89,7 +97,6 @@ public interface OAuth2GrantType extends Provider {
             this.event = event;
             this.cors = cors;
             this.tokenManager = tokenManager;
-            this.dPoP = dPoP;
         }
 
         public Context(Context context) {
@@ -106,7 +113,6 @@ public interface OAuth2GrantType extends Provider {
             this.event = context.event;
             this.cors = context.cors;
             this.tokenManager = context.tokenManager;
-            this.dPoP = context.dPoP;
         }
 
         public void setFormParams(MultivaluedHashMap<String, String> formParams) {
@@ -125,6 +131,57 @@ public interface OAuth2GrantType extends Provider {
             this.clientAuthAttributes = clientAuthAttributes;
         }
 
+        public ClientModel getClient() {
+            return client;
+        }
+
+        public Map<String, String> getClientAuthAttributes() {
+            return clientAuthAttributes;
+        }
+
+        public Object getClientConfig() {
+            return clientConfig;
+        }
+
+        public ClientConnection getClientConnection() {
+            return clientConnection;
+        }
+
+        public Cors getCors() {
+            return cors;
+        }
+
+        public EventBuilder getEvent() {
+            return event;
+        }
+
+        public MultivaluedMap<String, String> getFormParams() {
+            return formParams;
+        }
+
+        public HttpHeaders getHeaders() {
+            return headers;
+        }
+
+        public RealmModel getRealm() {
+            return realm;
+        }
+
+        public HttpRequest getRequest() {
+            return request;
+        }
+
+        public HttpResponse getResponse() {
+            return response;
+        }
+
+        public KeycloakSession getSession() {
+            return session;
+        }
+
+        public Object getTokenManager() {
+            return tokenManager;
+        }
     }
 
 }

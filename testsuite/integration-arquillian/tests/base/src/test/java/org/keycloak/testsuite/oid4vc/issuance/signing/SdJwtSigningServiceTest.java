@@ -18,7 +18,6 @@
 package org.keycloak.testsuite.oid4vc.issuance.signing;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 import org.keycloak.TokenVerifier;
 import org.keycloak.common.VerificationException;
@@ -30,14 +29,20 @@ import org.keycloak.crypto.ServerECDSASignatureVerifierContext;
 import org.keycloak.crypto.SignatureVerifierContext;
 import org.keycloak.jose.jws.crypto.HashUtils;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.protocol.oid4vc.issuance.signing.JwtSigningService;
+import org.keycloak.protocol.oid4vc.issuance.VCIssuanceContext;
+import org.keycloak.protocol.oid4vc.issuance.credentialbuilder.SdJwtCredentialBody;
+import org.keycloak.protocol.oid4vc.issuance.credentialbuilder.SdJwtCredentialBuilder;
 import org.keycloak.protocol.oid4vc.issuance.signing.SdJwtSigningService;
 import org.keycloak.protocol.oid4vc.issuance.signing.SigningServiceException;
+import org.keycloak.protocol.oid4vc.model.CredentialBuildConfig;
+import org.keycloak.protocol.oid4vc.model.CredentialConfigId;
 import org.keycloak.protocol.oid4vc.model.VerifiableCredential;
+import org.keycloak.protocol.oid4vc.model.VerifiableCredentialType;
 import org.keycloak.representations.JsonWebToken;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.sdjwt.SdJwtUtils;
 import org.keycloak.testsuite.runonserver.RunOnServerException;
+import org.keycloak.util.JsonSerialization;
 
 import java.security.PublicKey;
 import java.util.Arrays;
@@ -52,12 +57,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-public class SdJwtSigningServiceTest extends SigningServiceTest {
+public class SdJwtSigningServiceTest extends OID4VCTest {
 
-    private static ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private static KeyWrapper rsaKey = getRsaKey();
+    private static final KeyWrapper rsaKey = getRsaKey();
 
-    // If an unsupported algorithm is provided, the JWT Sigining Service should not be instantiated.
+    // If an unsupported algorithm is provided, the JWT Signing Service should not be instantiated.
     @Test(expected = SigningServiceException.class)
     public void testUnsupportedAlgorithm() throws Throwable {
         try {
@@ -66,35 +70,30 @@ public class SdJwtSigningServiceTest extends SigningServiceTest {
                     .run(session ->
                             new SdJwtSigningService(
                                     session,
-                                    new ObjectMapper(),
                                     getKeyFromSession(session).getKid(),
                                     "unsupported-algorithm",
-                                    "JWT",
-                                    "sha-256",
-                                    "did:web:test.org",
-                                    0,
-                                    List.of(),
-                                    new StaticTimeProvider(1000),
-                                    Optional.empty()));
+                                    Optional.empty(),
+                                    VerifiableCredentialType.from("https://credentials.example.com/test-credential"),
+                                    CredentialConfigId.from("test-credential")));
         } catch (RunOnServerException ros) {
             throw ros.getCause();
         }
     }
 
-    // If no key is provided, the JWT Sigining Service should not be instantiated.
+    // If no key is provided, the JWT Signing Service should not be instantiated.
     @Test(expected = SigningServiceException.class)
     public void testFailIfNoKey() throws Throwable {
         try {
             getTestingClient()
                     .server(TEST_REALM_NAME)
                     .run(session ->
-                            new JwtSigningService(
+                            new SdJwtSigningService(
                                     session,
                                     "no-such-key",
                                     Algorithm.RS256,
-                                    "JWT",
-                                    "did:web:test.org",
-                                    new StaticTimeProvider(1000)));
+                                    Optional.empty(),
+                                    VerifiableCredentialType.from("https://credentials.example.com/test-credential"),
+                                    CredentialConfigId.from("test-credential")));
         } catch (RunOnServerException ros) {
             throw ros.getCause();
         }
@@ -183,22 +182,28 @@ public class SdJwtSigningServiceTest extends SigningServiceTest {
             algorithm, Map<String, Object> claims, int decoys, List<String> visibleClaims) {
         KeyWrapper keyWrapper = getKeyFromSession(session);
 
+        CredentialBuildConfig credentialBuildConfig = new CredentialBuildConfig()
+                .setCredentialType("https://credentials.example.com/test-credential")
+                .setTokenJwsType("example+sd-jwt")
+                .setHashAlgorithm("sha-256")
+                .setNumberOfDecoys(decoys)
+                .setVisibleClaims(visibleClaims);
+
         SdJwtSigningService signingService = new SdJwtSigningService(
                 session,
-                new ObjectMapper(),
                 keyWrapper.getKid(),
                 algorithm,
-                "vc+sd-jwt",
-                "sha-256",
-                "did:web:test.org",
-                decoys,
-                visibleClaims,
-                new StaticTimeProvider(1000),
-                keyId);
+                keyId,
+                VerifiableCredentialType.from("https://credentials.example.com/test-credential"),
+                CredentialConfigId.from("test-credential"));
 
         VerifiableCredential testCredential = getTestCredential(claims);
+        SdJwtCredentialBody sdJwtCredentialBody = new SdJwtCredentialBuilder("did:web:test.org")
+                .buildCredentialBody(testCredential, credentialBuildConfig);
 
-        String sdJwt = signingService.signCredential(testCredential);
+        VCIssuanceContext context = new VCIssuanceContext().setCredentialBody(sdJwtCredentialBody);
+        String sdJwt = signingService.signCredential(context);
+
         SignatureVerifierContext verifierContext = null;
         switch (algorithm) {
             case Algorithm.ES256: {
@@ -240,11 +245,7 @@ public class SdJwtSigningServiceTest extends SigningServiceTest {
             JsonWebToken theToken = verifier.getToken();
 
             assertEquals("The issuer should be set in the token.", TEST_DID.toString(), theToken.getIssuer());
-            assertEquals("The credential ID should be set as the token ID.", testCredential.getId().toString(), theToken.getId());
-            assertEquals("The type should be included", TEST_TYPES.get(0), theToken.getOtherClaims().get("vct"));
-
-            assertEquals("The nbf date should be included", TEST_ISSUANCE_DATE.toInstant().getEpochSecond(), theToken.getNbf().longValue());
-
+            assertEquals("The type should be included", "https://credentials.example.com/test-credential", theToken.getOtherClaims().get("vct"));
             List<String> sds = (List<String>) theToken.getOtherClaims().get("_sd");
             if (sds != null && !sds.isEmpty()){
                 assertEquals("The algorithm should be included", "sha-256", theToken.getOtherClaims().get("_sd_alg"));
@@ -266,7 +267,7 @@ public class SdJwtSigningServiceTest extends SigningServiceTest {
                 .map(disclosed -> new String(Base64.getUrlDecoder().decode(disclosed)))
                 .map(disclosedString -> {
                     try {
-                        return OBJECT_MAPPER.readValue(disclosedString, List.class);
+                        return JsonSerialization.mapper.readValue(disclosedString, List.class);
                     } catch (JsonProcessingException e) {
                         throw new RuntimeException(e);
                     }

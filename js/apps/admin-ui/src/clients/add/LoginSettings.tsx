@@ -1,7 +1,7 @@
 import { FormGroup } from "@patternfly/react-core";
 import { useFormContext } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { HelpItem, TextControl } from "ui-shared";
+import { HelpItem, TextControl } from "@keycloak/keycloak-ui-shared";
 
 import { MultiLineInput } from "../../components/multi-line-input/MultiLineInput";
 import { convertAttributeNameToForm } from "../../util";
@@ -18,6 +18,7 @@ export const LoginSettings = ({
   const { watch } = useFormContext<FormFields>();
 
   const standardFlowEnabled = watch("standardFlowEnabled");
+  const implicitFlowEnabled = watch("implicitFlowEnabled");
 
   return (
     <>
@@ -33,7 +34,7 @@ export const LoginSettings = ({
         label={t("homeURL")}
         labelIcon={t("homeURLHelp")}
       />
-      {standardFlowEnabled && (
+      {(standardFlowEnabled || implicitFlowEnabled) && (
         <>
           <FormGroup
             label={t("validRedirectUri")}

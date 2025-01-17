@@ -20,9 +20,9 @@ import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.models.IdentityProviderMapperModel;
 import org.keycloak.models.IdentityProviderSyncMode;
-import org.keycloak.models.UserModel;
 import org.keycloak.representations.idm.ComponentRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
+import org.keycloak.representations.idm.FederatedIdentityRepresentation;
 import org.keycloak.representations.idm.IdentityProviderMapperRepresentation;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
@@ -30,10 +30,11 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
+import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.federation.UserMapStorageFactory;
-import org.keycloak.testsuite.forms.VerifyProfileTest;
 import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.util.AccountHelper;
+import org.keycloak.testsuite.util.FederatedIdentityBuilder;
 import org.keycloak.testsuite.util.MailServer;
 import org.keycloak.testsuite.util.MailServerConfiguration;
 import org.keycloak.testsuite.util.SecondBrowser;
@@ -42,16 +43,17 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
-import org.openqa.selenium.htmlunit.HtmlUnitDriver;
 import org.openqa.selenium.support.PageFactory;
 
 import static org.junit.Assert.assertEquals;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.startsWith;
 import static org.junit.Assert.assertTrue;
 import static org.keycloak.storage.UserStorageProviderModel.IMPORT_ENABLED;
 import static org.keycloak.testsuite.admin.ApiUtil.removeUserByUsername;
 import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.assertHardCodedSessionNote;
 import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.configureAutoLinkFlow;
+import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.configureConfirmOverrideLinkFlow;
 import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.grantReadTokenRole;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.USER_EMAIL;
 import static org.keycloak.testsuite.broker.BrokerTestTools.getConsumerRoot;
@@ -68,7 +70,7 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
     @Drone
     @SecondBrowser
     protected WebDriver driver2;
-    
+
     @Rule
     public AssertEvents events = new AssertEvents(this);
 
@@ -359,7 +361,7 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
 
         // Click browser 'back' and then 'forward' and then continue
         driver.navigate().back();
-        assertTrue(driver.getPageSource().contains("You are already logged in."));
+        loginExpiredPage.assertCurrent();
         driver.navigate().forward(); // here a new execution ID is added to the URL using JS, see below
         idpConfirmLinkPage.assertCurrent();
 
@@ -368,11 +370,9 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
         waitForPage(driver, "update account information", false);
         updateAccountInformationPage.assertCurrent();
         driver.navigate().back();
-        // JS-capable browsers (i.e. all except HtmlUnit) add a new execution ID to the URL which then causes the login expire page to appear (because the old ID and new ID don't match)
-        if (!(driver instanceof HtmlUnitDriver)) {
-            loginExpiredPage.assertCurrent();
-            loginExpiredPage.clickLoginContinueLink();
-        }
+
+        loginExpiredPage.assertCurrent();
+        loginExpiredPage.clickLoginContinueLink();
         waitForPage(driver, "update account information", false);
         updateAccountInformationPage.assertCurrent();
         updateAccountInformationPage.updateAccountInformation(bc.getUserEmail(), "FirstName", "LastName");
@@ -891,9 +891,6 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
 
         List<UserRepresentation> users = realm.users().search("no-email");
         assertEquals(1, users.size());
-        List<String> requiredActions = users.get(0).getRequiredActions();
-        assertEquals(1, requiredActions.size());
-        assertEquals(UserModel.RequiredAction.VERIFY_EMAIL.name(), requiredActions.get(0));
 
     }
 
@@ -1023,6 +1020,53 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
     }
 
     @Test
+    public void testLinkAccountByEmailVerificationInAnotherBrowser() {
+        RealmResource realm = adminClient.realm(bc.consumerRealmName());
+
+        UserResource userResource = realm.users().get(createUser("consumer"));
+        UserRepresentation consumerUser = userResource.toRepresentation();
+
+        consumerUser.setEmail(bc.getUserEmail());
+        consumerUser.setEmailVerified(true);
+        userResource.update(consumerUser);
+        configureSMTPServer();
+
+        oauth.clientId("broker-app");
+        loginPage.open(bc.consumerRealmName());
+
+        logInWithBroker(bc);
+
+        //link account by email
+        waitForPage(driver, "update account information", false);
+        Assert.assertTrue(updateAccountInformationPage.isCurrent());
+        updateAccountInformationPage.updateAccountInformation("FirstName", "LastName");
+        waitForPage(driver, "account already exists", false);
+        assertTrue(idpConfirmLinkPage.isCurrent());
+        assertEquals("User with email user@localhost.com already exists. How do you want to continue?", idpConfirmLinkPage.getMessage());
+        idpConfirmLinkPage.clickLinkAccount();
+        idpLinkEmailPage.assertCurrent();
+
+        String url = assertEmailAndGetUrl(MailServerConfiguration.FROM, USER_EMAIL,
+                "Someone wants to link your ", false);
+
+        // in the second browser confirm the mail
+        driver2.navigate().to(url);
+        assertThat(driver2.findElement(By.className("instruction")).getText(), startsWith("Confirm linking the account"));
+        driver2.findElement(By.linkText("» Click here to proceed")).click();
+        assertThat(driver2.findElement(By.className("instruction")).getText(), startsWith("You successfully verified your email."));
+
+        idpLinkEmailPage.continueLink();
+
+        //test if user is logged in
+        assertTrue(driver.getCurrentUrl().startsWith(getConsumerRoot() + "/auth/realms/master/app/"));
+        // check user is linked
+        List<FederatedIdentityRepresentation> identities = userResource.getFederatedIdentity();
+        assertEquals(1, identities.size());
+        assertEquals(bc.getIDPAlias(), identities.iterator().next().getIdentityProvider());
+        assertEquals(bc.getUserLogin(), identities.iterator().next().getUserName());
+    }
+
+    @Test
     public void testLinkAccountByEmailVerificationToEmailVerifiedUser() {
         // set up a user with verified email
         RealmResource realm = adminClient.realm(bc.consumerRealmName());
@@ -1144,7 +1188,7 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
         //test if the user has verified email
         assertTrue(consumerRealm.users().get(linkedUserId).toRepresentation().isEmailVerified());
     }
-    
+
     @Test
     public void testEventsOnUpdateProfileNoEmailChange() {
         updateExecutions(AbstractBrokerTest::setUpMissingUpdateProfileOnFirstLogin);
@@ -1163,7 +1207,7 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
         loginPage.login("no-first-name", "password");
 
         waitForPage(driver, "update account information", false);
-        
+
         updateAccountInformationPage.assertCurrent();
         updateAccountInformationPage.updateAccountInformation("FirstName", "LastName");
 
@@ -1217,7 +1261,7 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
         loginPage.login("no-first-name", "password");
 
         waitForPage(driver, "update account information", false);
-        
+
         updateAccountInformationPage.assertCurrent();
         updateAccountInformationPage.updateAccountInformation("new-email@localhost.com","FirstName", "LastName");
 
@@ -1292,7 +1336,7 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
         loginPage.login("no-first-name", "password");
 
         waitForPage(driver, "update account information", false);
-        
+
         updateAccountInformationPage.assertCurrent();
         updateAccountInformationPage.updateAccountInformation("FirstName", "LastName");
 
@@ -1453,6 +1497,73 @@ public abstract class AbstractFirstBrokerLoginTest extends AbstractInitializedBa
         } finally {
             removeUserByUsername(adminClient.realm(bc.consumerRealmName()), bc.getUserLogin());
         }
+    }
+
+    @Test
+    public void testConfirmOverrideLink() {
+        RealmResource consumerRealm = adminClient.realm(bc.consumerRealmName());
+        RealmResource providerRealm = adminClient.realm(bc.providerRealmName());
+
+        testingClient.server(bc.consumerRealmName())
+                .run(configureConfirmOverrideLinkFlow(bc.getIDPAlias()));
+
+        // create a user with existing federated identity
+        String createdUser = createUser(bc.getUserLogin());
+
+        FederatedIdentityRepresentation identity = FederatedIdentityBuilder.create()
+                .userId("id")
+                .userName("username")
+                .identityProvider(bc.getIDPAlias())
+                .build();
+
+        try (Response response = consumerRealm.users().get(createdUser)
+                .addFederatedIdentity(bc.getIDPAlias(), identity)) {
+            assertEquals("status", 204, response.getStatus());
+        }
+
+        // login with the same username user but different user id from provider
+        logInAsUserInIDP();
+
+        idpConfirmOverrideLinkPage.assertCurrent();
+        String expectMessage = "You are trying to link your account testuser with the " + bc.getIDPAlias() + " account testuser. " +
+                "But your account is already linked with different " + bc.getIDPAlias() + " account username. " +
+                "Can you confirm if you want to replace the existing link with the new account?";
+        assertEquals(expectMessage, idpConfirmOverrideLinkPage.getMessage());
+        idpConfirmOverrideLinkPage.clickConfirmOverride();
+
+        // assert federated identity override
+        UserRepresentation user = ApiUtil.findUserByUsername(providerRealm, bc.getUserLogin());
+        String providerUserId = user.getId();
+        List<FederatedIdentityRepresentation> federatedIdentities = consumerRealm.users().get(createdUser).getFederatedIdentity();
+        assertEquals(1, federatedIdentities.size());
+        FederatedIdentityRepresentation actual = federatedIdentities.get(0);
+        assertEquals(bc.getIDPAlias(), actual.getIdentityProvider());
+        assertEquals(bc.getUserLogin(), actual.getUserName());
+        if (this instanceof KcSamlFirstBrokerLoginTest) {
+            // for SAML, the userID is username
+            assertEquals(bc.getUserLogin(), actual.getUserId());
+        } else {
+            // for OIDC, the userID is id
+            assertEquals(providerUserId, actual.getUserId());
+        }
+
+        RealmRepresentation consumerRealmRep = consumerRealm.toRepresentation();
+
+        // one for showing the confirm page
+        events.expectIdentityProviderFirstLogin(consumerRealmRep, bc.getIDPAlias(), bc.getUserLogin())
+                .assertEvent(getFirstConsumerEvent());
+        // one for submitting the confirmAction
+        events.expectIdentityProviderFirstLogin(consumerRealmRep, bc.getIDPAlias(), bc.getUserLogin())
+                .assertEvent(getFirstConsumerEvent());
+
+        events.expect(EventType.FEDERATED_IDENTITY_OVERRIDE_LINK)
+                .client("broker-app")
+                .realm(consumerRealmRep)
+                .user(createdUser)
+                .detail(Details.IDENTITY_PROVIDER, bc.getIDPAlias())
+                .detail(Details.IDENTITY_PROVIDER_USERNAME, bc.getUserLogin())
+                .detail(Details.PREF_PREVIOUS + Details.IDENTITY_PROVIDER_USERNAME, "username")
+                .assertEvent(getFirstConsumerEvent());
     }
 
     private Runnable toggleRegistrationAllowed(String realmName, boolean registrationAllowed) {

@@ -46,8 +46,7 @@ public final class Constants {
     public static final List<ValueOrSecret> DEFAULT_DIST_CONFIG_LIST = List.of(
             new ValueOrSecret("health-enabled", "true"),
             new ValueOrSecret("cache", "ispn"),
-            new ValueOrSecret("cache-stack", "kubernetes"),
-            new ValueOrSecret("proxy", "passthrough")
+            new ValueOrSecret("cache-stack", "kubernetes")
     );
 
 
@@ -58,7 +57,13 @@ public final class Constants {
     public static final String KEYCLOAK_SERVICE_PROTOCOL = "TCP";
     public static final String KEYCLOAK_SERVICE_SUFFIX = "-service";
     public static final Integer KEYCLOAK_DISCOVERY_SERVICE_PORT = 7800;
+    public static final String KEYCLOAK_DISCOVERY_TCP_PORT_NAME = "tcp";
     public static final String KEYCLOAK_DISCOVERY_SERVICE_SUFFIX = "-discovery";
+    public static final Integer KEYCLOAK_JGROUPS_DATA_PORT = 7800;
+    public static final Integer KEYCLOAK_JGROUPS_FD_PORT = 57800;
+    public static final String KEYCLOAK_JGROUPS_PROTOCOL = "TCP";
+    public static final Integer KEYCLOAK_MANAGEMENT_PORT = 9000;
+    public static final String KEYCLOAK_MANAGEMENT_PORT_NAME = "management";
 
     public static final String KEYCLOAK_INGRESS_SUFFIX = "-ingress";
 
@@ -71,4 +76,7 @@ public final class Constants {
     public static final String CACHE_CONFIG_FOLDER = CONFIG_FOLDER + "/" + CACHE_CONFIG_SUBFOLDER;
 
     public static final String KEYCLOAK_HTTP_RELATIVE_PATH_KEY = "http-relative-path";
+    public static final String KEYCLOAK_HTTP_MANAGEMENT_RELATIVE_PATH_KEY = "http-management-relative-path";
+
+    public static final String KEYCLOAK_NETWORK_POLICY_SUFFIX = "-network-policy";
 }

@@ -6,7 +6,6 @@ import ListingPage from "../support/pages/admin-ui/ListingPage";
 import { keycloakBefore } from "../support/util/keycloak_hooks";
 import PageObject from "../support/pages/admin-ui/components/PageObject";
 import adminClient from "../support/util/AdminClient";
-import { v4 as uuid } from "uuid";
 
 const loginPage = new LoginPage();
 const sidebarPage = new SidebarPage();
@@ -42,8 +41,8 @@ describe("Sessions test", () => {
   });
 
   describe("Offline sessions", () => {
-    const clientId = "offline-client-" + uuid();
-    const username = "user-" + uuid();
+    const clientId = "offline-client-" + crypto.randomUUID();
+    const username = "user-" + crypto.randomUUID();
 
     beforeEach(async () => {
       await Promise.all([
@@ -86,21 +85,13 @@ describe("Sessions test", () => {
 
       listingPage.searchItem(clientId, false);
       sidebarPage.waitForPageLoad();
-      // Log out the associated online session of the user
-      commonPage
-        .tableUtils()
-        .checkRowItemExists(username)
-        .selectRowItemAction(username, "Sign out");
-
-      listingPage.searchItem(clientId, false);
-      sidebarPage.waitForPageLoad();
 
       // Now check that offline session exists (online one has been logged off above)
-      // and that it is not possible to sign it out
+      // and that it is possible to revoke it
       commonPage
         .tableUtils()
         .checkRowItemExists(username)
-        .assertRowItemActionDoesNotExist(username, "Sign out");
+        .selectRowItemAction(username, "Revoke");
     });
   });
 

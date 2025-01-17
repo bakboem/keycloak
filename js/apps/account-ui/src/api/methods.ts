@@ -1,10 +1,14 @@
-import { KeycloakContext } from "../root/KeycloakContext";
+import {
+  BaseEnvironment,
+  type KeycloakContext,
+} from "@keycloak/keycloak-ui-shared";
+
+import OrganizationRepresentation from "@keycloak/keycloak-admin-client/lib/defs/organizationRepresentation";
 import { joinPath } from "../utils/joinPath";
 import { parseResponse } from "./parse-response";
 import {
   ClientRepresentation,
   CredentialContainer,
-  CredentialRepresentation,
   DeviceRepresentation,
   Group,
   LinkedAccountRepresentation,
@@ -14,7 +18,7 @@ import {
 import { request } from "./request";
 
 export type CallOptions = {
-  context: KeycloakContext;
+  context: KeycloakContext<BaseEnvironment>;
   signal?: AbortSignal;
 };
 
@@ -42,7 +46,7 @@ export async function getSupportedLocales({
 }
 
 export async function savePersonalInfo(
-  context: KeycloakContext,
+  context: KeycloakContext<BaseEnvironment>,
   info: UserRepresentation,
 ): Promise<void> {
   const response = await request("/", context, { body: info, method: "POST" });
@@ -82,11 +86,17 @@ export async function getApplications({
   return parseResponse<ClientRepresentation[]>(response);
 }
 
-export async function deleteConsent(context: KeycloakContext, id: string) {
+export async function deleteConsent(
+  context: KeycloakContext<BaseEnvironment>,
+  id: string,
+) {
   return request(`/applications/${id}/consent`, context, { method: "DELETE" });
 }
 
-export async function deleteSession(context: KeycloakContext, id?: string) {
+export async function deleteSession(
+  context: KeycloakContext<BaseEnvironment>,
+  id?: string,
+) {
   return request(`/sessions${id ? `/${id}` : ""}`, context, {
     method: "DELETE",
   });
@@ -99,22 +109,27 @@ export async function getCredentials({ signal, context }: CallOptions) {
   return parseResponse<CredentialContainer[]>(response);
 }
 
-export async function deleteCredentials(
-  context: KeycloakContext,
-  credential: CredentialRepresentation,
-) {
-  return request("/credentials/" + credential.id, context, {
-    method: "DELETE",
-  });
-}
+export type LinkedAccountQueryParams = PaginationParams & {
+  search?: string;
+  linked?: boolean;
+};
 
-export async function getLinkedAccounts({ signal, context }: CallOptions) {
-  const response = await request("/linked-accounts", context, { signal });
+export async function getLinkedAccounts(
+  { signal, context }: CallOptions,
+  query: LinkedAccountQueryParams,
+) {
+  const response = await request("/linked-accounts", context, {
+    searchParams: Object.entries(query).reduce(
+      (acc, [key, value]) => ({ ...acc, [key]: value.toString() }),
+      {},
+    ),
+    signal,
+  });
   return parseResponse<LinkedAccountRepresentation[]>(response);
 }
 
 export async function unLinkAccount(
-  context: KeycloakContext,
+  context: KeycloakContext<BaseEnvironment>,
   account: LinkedAccountRepresentation,
 ) {
   const response = await request(
@@ -129,12 +144,12 @@ export async function unLinkAccount(
 }
 
 export async function linkAccount(
-  context: KeycloakContext,
+  context: KeycloakContext<BaseEnvironment>,
   account: LinkedAccountRepresentation,
 ) {
   const redirectUri = encodeURIComponent(
     joinPath(
-      context.environment.authUrl,
+      context.environment.serverBaseUrl,
       "realms",
       context.environment.realm,
       "account",
@@ -155,4 +170,9 @@ export async function getGroups({ signal, context }: CallOptions) {
     signal,
   });
   return parseResponse<Group[]>(response);
+}
+
+export async function getUserOrganizations({ signal, context }: CallOptions) {
+  const response = await request("/organizations", context, { signal });
+  return parseResponse<OrganizationRepresentation[]>(response);
 }

@@ -5,20 +5,22 @@ import {
   ButtonVariant,
   Dropdown,
   DropdownItem,
+  DropdownList,
   InputGroup,
-  KebabToggle,
+  InputGroupItem,
+  MenuToggle,
   SearchInput,
   ToolbarItem,
 } from "@patternfly/react-core";
-import { ArrowRightIcon } from "@patternfly/react-icons";
+import { ArrowRightIcon, EllipsisVIcon } from "@patternfly/react-icons";
 import { ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAccess } from "../../context/access/Access";
 import { SearchDropdown, SearchType } from "../../user/details/SearchFilter";
-import { UserAttribute } from "./UserDataTable";
-import { UserDataTableAttributeSearchForm } from "./UserDataTableAttributeSearchForm";
 import DropdownPanel from "../dropdown-panel/DropdownPanel";
+import { UserFilter } from "./UserDataTable";
+import { UserDataTableAttributeSearchForm } from "./UserDataTableAttributeSearchForm";
 
 type UserDataTableToolbarItemsProps = {
   searchDropdownOpen: boolean;
@@ -32,8 +34,8 @@ type UserDataTableToolbarItemsProps = {
   setSearchType: (searchType: SearchType) => void;
   searchUser: string;
   setSearchUser: (searchUser: string) => void;
-  activeFilters: UserAttribute[];
-  setActiveFilters: (activeFilters: UserAttribute[]) => void;
+  activeFilters: UserFilter;
+  setActiveFilters: (activeFilters: UserFilter) => void;
   refresh: () => void;
   profile: UserProfileConfig;
   clearAllFilters: () => void;
@@ -76,13 +78,15 @@ export function UserDataTableToolbarItems({
     return (
       <ToolbarItem>
         <InputGroup>
-          <SearchDropdown
-            searchType={searchType}
-            onSelect={(searchType) => {
-              clearAllFilters();
-              setSearchType(searchType);
-            }}
-          />
+          <InputGroupItem>
+            <SearchDropdown
+              searchType={searchType}
+              onSelect={(searchType) => {
+                clearAllFilters();
+                setSearchType(searchType);
+              }}
+            />
+          </InputGroupItem>
           {searchType === "default" && defaultSearchInput()}
           {searchType === "attribute" && attributeSearchInput()}
         </InputGroup>
@@ -94,19 +98,18 @@ export function UserDataTableToolbarItems({
     return (
       <ToolbarItem>
         <SearchInput
+          data-testid="table-search-input"
           placeholder={t("searchForUser")}
           aria-label={t("search")}
           value={searchUser}
-          onChange={(_, value) => {
-            setSearchUser(value);
-          }}
-          onSearch={() => {
-            setSearchUser(searchUser);
+          onSearch={(_, _v, attribute) => {
+            setSearchUser(attribute["haswords"]);
             refresh();
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              setSearchUser(searchUser);
+              const target = e.target as HTMLInputElement;
+              setSearchUser(target.value);
               refresh();
             }
           }}
@@ -123,6 +126,7 @@ export function UserDataTableToolbarItems({
     return (
       <>
         <DropdownPanel
+          data-testid="select-attributes-dropdown"
           buttonText={t("selectAttributes")}
           setSearchDropdownOpen={setSearchDropdownOpen}
           searchDropdownOpen={searchDropdownOpen}
@@ -166,10 +170,21 @@ export function UserDataTableToolbarItems({
   ) : (
     <ToolbarItem>
       <Dropdown
-        toggle={<KebabToggle onToggle={(open) => setKebabOpen(open)} />}
+        onOpenChange={(isOpen) => setKebabOpen(isOpen)}
+        toggle={(ref) => (
+          <MenuToggle
+            ref={ref}
+            isExpanded={kebabOpen}
+            variant="plain"
+            onClick={() => setKebabOpen(!kebabOpen)}
+          >
+            <EllipsisVIcon />
+          </MenuToggle>
+        )}
         isOpen={kebabOpen}
-        isPlain
-        dropdownItems={[
+        shouldFocusToggleOnSelect
+      >
+        <DropdownList>
           <DropdownItem
             key="deleteUser"
             component="button"
@@ -180,7 +195,7 @@ export function UserDataTableToolbarItems({
             }}
           >
             {t("deleteUser")}
-          </DropdownItem>,
+          </DropdownItem>
 
           <DropdownItem
             key="unlock"
@@ -191,9 +206,9 @@ export function UserDataTableToolbarItems({
             }}
           >
             {t("unlockAllUsers")}
-          </DropdownItem>,
-        ]}
-      />
+          </DropdownItem>
+        </DropdownList>
+      </Dropdown>
     </ToolbarItem>
   );
 

@@ -106,12 +106,12 @@ public class OAuthRedirectUriTest extends AbstractKeycloakTest {
         RealmBuilder realm = RealmBuilder.edit(realmRepresentation).testEventListener();
 
         ClientBuilder installedApp = ClientBuilder.create().clientId("test-installed").name("test-installed")
-                .redirectUris(Constants.INSTALLED_APP_URN, Constants.INSTALLED_APP_URL)
+                .redirectUris(Constants.INSTALLED_APP_URN, "http://localhost")
                 .secret("password");
         realm.client(installedApp);
 
         ClientBuilder installedApp2 = ClientBuilder.create().clientId("test-installed2").name("test-installed2")
-                .redirectUris(Constants.INSTALLED_APP_URL + "/myapp")
+                .redirectUris("http://localhost/myapp")
                 .secret("password");
         realm.client(installedApp2);
 
@@ -158,12 +158,12 @@ public class OAuthRedirectUriTest extends AbstractKeycloakTest {
         realm.client(installedAppCustomScheme);
 
         ClientBuilder installedAppLoopback = ClientBuilder.create().clientId("test-installed-loopback").name("test-installed-loopback")
-                .redirectUris(Constants.INSTALLED_APP_LOOPBACK)
+                .redirectUris("http://127.0.0.1")
                 .secret("password");
         realm.client(installedAppLoopback);
 
         ClientBuilder installedAppLoopback2 = ClientBuilder.create().clientId("test-installed-loopback2").name("test-installed-loopback2")
-                .redirectUris(Constants.INSTALLED_APP_LOOPBACK + "/myapp")
+                .redirectUris("http://127.0.0.1/myapp")
                 .secret("password");
         realm.client(installedAppLoopback2);
 
@@ -352,12 +352,12 @@ public class OAuthRedirectUriTest extends AbstractKeycloakTest {
         checkRedirectUri("http://example.com/foo/../", false);
         checkRedirectUri("http://example.com/foo/%2E%2E/", false); // url-encoded "http://example.com/foobar/../"
         checkRedirectUri("http://example.com/foo%2F%2E%2E%2F", false); // url-encoded "http://example.com/foobar/../"
-        checkRedirectUri("http://example.com/foo/%252E%252E/", false); // double-encoded "http://example.com/foobar/../"
-        checkRedirectUri("http://example.com/foo/%252E%252E/?some_query_param=some_value", false); // double-encoded "http://example.com/foobar/../?some_query_param=some_value"
-        checkRedirectUri("http://example.com/foo/%252E%252E/?encodeTest=a%3Cb", false); // double-encoded "http://example.com/foobar/../?encodeTest=a<b"
-        checkRedirectUri("http://example.com/foo/%252E%252E/#encodeTest=a%3Cb", false); // double-encoded "http://example.com/foobar/../?encodeTest=a<b"
-        checkRedirectUri("http://example.com/foo/%25252E%25252E/", false); // triple-encoded "http://example.com/foobar/../"
-        checkRedirectUri("http://example.com/foo/%2525252525252E%2525252525252E/", false); // seventh-encoded "http://example.com/foobar/../"
+        checkRedirectUri("http://example.com/foo/%252E%252E/", true); // double-encoded "http://example.com/foobar/../"
+        checkRedirectUri("http://example.com/foo/%252E%252E/?some_query_param=some_value", true); // double-encoded "http://example.com/foobar/../?some_query_param=some_value"
+        checkRedirectUri("http://example.com/foo/%252E%252E/?encodeTest=a%3Cb", true); // double-encoded "http://example.com/foobar/../?encodeTest=a<b"
+        checkRedirectUri("http://example.com/foo/%252E%252E/#encodeTest=a%3Cb", true); // double-encoded "http://example.com/foobar/../?encodeTest=a<b"
+        checkRedirectUri("http://example.com/foo/%25252E%25252E/", true); // triple-encoded "http://example.com/foobar/../"
+        checkRedirectUri("http://example.com/foo/%2525252525252E%2525252525252E/", true); // seventh-encoded "http://example.com/foobar/../"
 
         checkRedirectUri("http://example.com/foo?encodeTest=a%3Cb", true);
         checkRedirectUri("http://example.com/foo?encodeTest=a%3Cb#encode2=a%3Cb", true);

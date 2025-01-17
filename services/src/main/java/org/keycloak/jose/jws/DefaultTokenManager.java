@@ -53,7 +53,7 @@ import org.keycloak.util.JsonSerialization;
 import org.keycloak.util.TokenUtil;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.time.Duration;
 import java.util.Comparator;
@@ -78,7 +78,8 @@ public class DefaultTokenManager implements TokenManager {
         SignatureProvider signatureProvider = session.getProvider(SignatureProvider.class, signatureAlgorithm);
         SignatureSignerContext signer = signatureProvider.signer();
 
-        String encodedToken = new JWSBuilder().type("JWT").jsonContent(token).sign(signer);
+        String type = type(token.getCategory());
+        String encodedToken = new JWSBuilder().type(type).jsonContent(token).sign(signer);
         return encodedToken;
     }
 
@@ -105,7 +106,7 @@ public class DefaultTokenManager implements TokenManager {
                 kid = session.keys().getActiveKey(session.getContext().getRealm(), KeyUse.SIG, signatureAlgorithm).getKid();
             }
 
-            boolean valid = signatureProvider.verifier(kid).verify(jws.getEncodedSignatureInput().getBytes("UTF-8"), jws.getSignature());
+            boolean valid = signatureProvider.verifier(kid).verify(jws.getEncodedSignatureInput().getBytes(StandardCharsets.UTF_8), jws.getSignature());
             return valid ? jws.readJsonContent(clazz) : null;
         } catch (Exception e) {
             logger.debug("Failed to decode token", e);
@@ -180,7 +181,7 @@ public class DefaultTokenManager implements TokenManager {
                 return null;
             }
 
-            boolean valid = signatureProvider.verifier(client, jws).verify(jws.getEncodedSignatureInput().getBytes("UTF-8"), jws.getSignature());
+            boolean valid = signatureProvider.verifier(client, jws).verify(jws.getEncodedSignatureInput().getBytes(StandardCharsets.UTF_8), jws.getSignature());
             return valid ? jws.readJsonContent(clazz) : null;
         } catch (Exception e) {
             logger.debug("Failed to decode token", e);
@@ -235,6 +236,15 @@ public class DefaultTokenManager implements TokenManager {
         return encodedToken;
     }
 
+    private String type(TokenCategory category) {
+        switch (category) {
+            case LOGOUT:
+                return TokenUtil.TOKEN_TYPE_JWT_LOGOUT_TOKEN;
+            default:
+                return "JWT";
+        }
+    }
+
     private boolean isTokenEncryptRequired(TokenCategory category) {
         if (cekManagementAlgorithm(category) == null) return false;
         if (encryptAlgorithm(category) == null) return false;
@@ -262,8 +272,8 @@ public class DefaultTokenManager implements TokenManager {
         Key encryptionKek = keyWrapper.getPublicKey();
         String encryptionKekId = keyWrapper.getKid();
         try {
-            encryptedToken = TokenUtil.jweKeyEncryptionEncode(encryptionKek, encodedToken.getBytes("UTF-8"), algAlgorithm, encAlgorithm, encryptionKekId, jweAlgorithmProvider, jweEncryptionProvider);
-        } catch (JWEException | UnsupportedEncodingException e) {
+            encryptedToken = TokenUtil.jweKeyEncryptionEncode(encryptionKek, encodedToken.getBytes(StandardCharsets.UTF_8), algAlgorithm, encAlgorithm, encryptionKekId, jweAlgorithmProvider, jweEncryptionProvider);
+        } catch (JWEException e) {
             throw new RuntimeException(e);
         }
         return encryptedToken;
@@ -273,6 +283,8 @@ public class DefaultTokenManager implements TokenManager {
     public String cekManagementAlgorithm(TokenCategory category) {
         if (category == null) return null;
         switch (category) {
+            case INTERNAL:
+                return Algorithm.AES;
             case ID:
             case LOGOUT:
                 return getCekManagementAlgorithm(OIDCConfigAttributes.ID_TOKEN_ENCRYPTED_RESPONSE_ALG);
@@ -300,6 +312,8 @@ public class DefaultTokenManager implements TokenManager {
         switch (category) {
             case ID:
                 return getEncryptAlgorithm(OIDCConfigAttributes.ID_TOKEN_ENCRYPTED_RESPONSE_ENC, JWEConstants.A128CBC_HS256);
+            case INTERNAL:
+                return JWEConstants.A128CBC_HS256;
             case LOGOUT:
                 return getEncryptAlgorithm(OIDCConfigAttributes.ID_TOKEN_ENCRYPTED_RESPONSE_ENC);
             case AUTHORIZATION_RESPONSE:

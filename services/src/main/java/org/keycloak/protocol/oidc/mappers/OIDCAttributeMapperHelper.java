@@ -110,6 +110,13 @@ public class OIDCAttributeMapperHelper {
         tmpToken.put(IDToken.ACR, (claim, mapperName, token, value) -> {
             token.setAcr(value.toString());
         });
+        tmpToken.put(IDToken.AUTH_TIME, (claim, mapperName, token, value) -> {
+            try {
+                token.setAuth_time(Long.parseLong(value.toString()));
+            } catch (NumberFormatException ignored){
+
+            }
+        });
         tmpToken.put("aud", (claim, mapperName, token, value) -> {
             if (value instanceof Collection) {
                 String[] audiences = ((Collection<?>) value).stream().map(Object::toString).toArray(String[]::new);
@@ -129,7 +136,6 @@ public class OIDCAttributeMapperHelper {
         tmpToken.put("iss", notAllowedInToken);
         tmpToken.put("scope", notAllowedInToken);
         tmpToken.put(IDToken.NONCE, notAllowedInToken);
-        tmpToken.put(IDToken.AUTH_TIME, notAllowedInToken);
         tmpToken.put(IDToken.SESSION_STATE, notAllowedInToken);
         tokenPropertySetters = Collections.unmodifiableMap(tmpToken);
 
@@ -436,18 +442,17 @@ public class OIDCAttributeMapperHelper {
     }
 
     public static void addJsonTypeConfig(List<ProviderConfigProperty> configProperties) {
+        addJsonTypeConfig(configProperties, List.of("String", "long", "int", "boolean", "JSON"), null);
+    }
+
+    public static void addJsonTypeConfig(List<ProviderConfigProperty> configProperties, List<String> supportedTypes, String defaultValue) {
         ProviderConfigProperty property = new ProviderConfigProperty();
         property.setName(JSON_TYPE);
         property.setLabel(JSON_TYPE);
-        List<String> types = new ArrayList<>(5);
-        types.add("String");
-        types.add("long");
-        types.add("int");
-        types.add("boolean");
-        types.add("JSON");
         property.setType(ProviderConfigProperty.LIST_TYPE);
-        property.setOptions(types);
+        property.setOptions(supportedTypes);
         property.setHelpText(JSON_TYPE_TOOLTIP);
+        property.setDefaultValue(defaultValue);
         configProperties.add(property);
     }
 

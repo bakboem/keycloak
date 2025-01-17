@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import SidebarPage from "../support/pages/admin-ui/SidebarPage";
 import LoginPage from "../support/pages/LoginPage";
 import RealmSettingsPage from "../support/pages/admin-ui/manage/realm_settings/RealmSettingsPage";
@@ -17,7 +16,7 @@ const realmSettingsPage = new RealmSettingsPage();
 const keysTab = new KeysTab();
 
 describe("Realm settings events tab tests", () => {
-  const realmName = "Realm_" + uuid();
+  const realmName = "Realm_" + crypto.randomUUID();
   const listingPage = new ListingPage();
 
   beforeEach(() => {
@@ -144,6 +143,7 @@ describe("Realm settings events tab tests", () => {
     cy.findByTestId("option-ecdsa-generated").click();
     realmSettingsPage.enterUIDisplayName("test_ecdsa-generated");
     realmSettingsPage.toggleSwitch("active", false);
+    realmSettingsPage.toggleSwitch("ecGenerateCertificate", false);
     realmSettingsPage.addProvider();
 
     realmSettingsPage.toggleAddProviderDropdown();
@@ -237,8 +237,8 @@ describe("Realm settings events tab tests", () => {
   it("Realm header settings", () => {
     sidebarPage.goToRealmSettings();
     cy.findByTestId("rs-security-defenses-tab").click();
-    cy.findByTestId("headers-form-tab-save").should("be.disabled");
-    cy.get("#xFrameOptions").clear().type("DENY");
+    cy.findByTestId("browserSecurityHeaders.xFrameOptions").clear();
+    cy.findByTestId("browserSecurityHeaders.xFrameOptions").type("DENY");
     cy.findByTestId("headers-form-tab-save").should("be.enabled").click();
 
     masthead.checkNotificationMessage("Realm successfully updated");
@@ -248,8 +248,6 @@ describe("Realm settings events tab tests", () => {
     sidebarPage.goToRealmSettings();
     cy.findAllByTestId("rs-security-defenses-tab").click();
     cy.get("#pf-tab-20-bruteForce").click();
-
-    cy.findByTestId("brute-force-tab-save").should("be.disabled");
 
     cy.get("#kc-brute-force-mode").click();
     cy.findByTestId("select-brute-force-mode")
@@ -346,6 +344,10 @@ describe("Realm settings events tab tests", () => {
       "have.value",
       1,
     );
+    cy.findByTestId(realmSettingsPage.parRequestUriLifespanInput).should(
+      "have.value",
+      2,
+    );
     cy.findByTestId(realmSettingsPage.accessTokenLifespanImplicitInput).should(
       "have.value",
       2,
@@ -410,7 +412,6 @@ describe("Realm settings events tab tests", () => {
   });
 
   it("Should remove all events from event listener and re-save original", () => {
-    realmSettingsPage.shouldSaveEventListener();
     realmSettingsPage.shouldRemoveAllEventListeners();
     realmSettingsPage.shouldReSaveEventListener();
   });

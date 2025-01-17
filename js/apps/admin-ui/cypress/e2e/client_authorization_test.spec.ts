@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import { keycloakBefore } from "../support/util/keycloak_hooks";
 import adminClient from "../support/util/AdminClient";
 import LoginPage from "../support/pages/LoginPage";
@@ -21,7 +20,7 @@ describe("Client authentication subtab", () => {
   const clientDetailsPage = new ClientDetailsPage();
   const policiesSubTab = new PoliciesTab();
   const permissionsSubTab = new PermissionsTab();
-  const clientId = "client-authentication-" + uuid();
+  const clientId = "client-authentication-" + crypto.randomUUID();
 
   before(() =>
     adminClient.createClient({
@@ -196,7 +195,7 @@ describe("Client authentication subtab", () => {
   });
 
   describe("Client authorization tab access for view-realm-authorization", () => {
-    const clientId = "realm-view-authz-client-" + uuid();
+    const clientId = "realm-view-authz-client-" + crypto.randomUUID();
 
     beforeEach(async () => {
       const [, testUser] = await Promise.all([
@@ -241,11 +240,11 @@ describe("Client authentication subtab", () => {
       loginPage.logIn("test-view-authz-user", "password");
       keycloakBefore();
 
-      sidebarPage
-        .waitForPageLoad()
-        .goToRealm("realm-view-authz")
-        .waitForPageLoad()
-        .goToClients();
+      sidebarPage.waitForPageLoad().goToRealm("realm-view-authz");
+
+      cy.reload();
+
+      sidebarPage.waitForPageLoad().goToClients();
 
       listingPage
         .searchItem(clientId, true, "realm-view-authz")

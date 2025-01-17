@@ -21,12 +21,11 @@ import org.jboss.logging.Logger;
 import org.keycloak.authentication.AbstractFormAuthenticator;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
-import org.keycloak.credential.hash.PasswordHashProvider;
+import org.keycloak.authentication.authenticators.util.AuthenticatorUtils;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.ModelDuplicateException;
-import org.keycloak.models.PasswordPolicy;
 import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.FormMessage;
@@ -84,8 +83,11 @@ public abstract class AbstractUsernameFormAuthenticator extends AbstractFormAuth
         return form.createLoginUsernamePassword();
     }
 
-    protected String disabledByBruteForceError() {
-        return Messages.INVALID_USER;
+    protected String disabledByBruteForceError(String error) {
+        if(Errors.USER_TEMPORARILY_DISABLED.equals(error)) {
+            return Messages.ACCOUNT_TEMPORARILY_DISABLED;
+        }
+        return Messages.ACCOUNT_PERMANENTLY_DISABLED;
     }
 
     protected String disabledByBruteForceFieldError(){
@@ -100,32 +102,9 @@ public abstract class AbstractUsernameFormAuthenticator extends AbstractFormAuth
         return challengeResponse;
     }
 
-    protected void runDefaultDummyHash(AuthenticationFlowContext context) {
-        PasswordHashProvider hash = context.getSession().getProvider(PasswordHashProvider.class, PasswordPolicy.HASH_ALGORITHM_DEFAULT);
-        hash.encode("SlightlyLongerDummyPassword", PasswordPolicy.HASH_ITERATIONS_DEFAULT);
-    }
-
-    protected void dummyHash(AuthenticationFlowContext context) {
-        PasswordPolicy policy = context.getRealm().getPasswordPolicy();
-        if (policy == null) {
-            runDefaultDummyHash(context);
-            return;
-        } else {
-            PasswordHashProvider hash = context.getSession().getProvider(PasswordHashProvider.class, policy.getHashAlgorithm());
-            if (hash == null) {
-                runDefaultDummyHash(context);
-                return;
-
-            } else {
-                hash.encode("SlightlyLongerDummyPassword", policy.getHashIterations());
-            }
-        }
-
-    }
-
     public void testInvalidUser(AuthenticationFlowContext context, UserModel user) {
         if (user == null) {
-            dummyHash(context);
+            AuthenticatorUtils.dummyHash(context);
             context.getEvent().error(Errors.USER_NOT_FOUND);
             Response challengeResponse = challenge(context, getDefaultChallengeMessage(context), FIELD_USERNAME);
             context.failureChallenge(AuthenticationFlowError.INVALID_USER, challengeResponse);
@@ -264,7 +243,7 @@ public abstract class AbstractUsernameFormAuthenticator extends AbstractFormAuth
         if (bruteForceError != null) {
             context.getEvent().user(user);
             context.getEvent().error(bruteForceError);
-            Response challengeResponse = challenge(context, disabledByBruteForceError(), disabledByBruteForceFieldError());
+            Response challengeResponse = challenge(context, disabledByBruteForceError(bruteForceError), disabledByBruteForceFieldError());
             context.forceChallenge(challengeResponse);
             return true;
         }

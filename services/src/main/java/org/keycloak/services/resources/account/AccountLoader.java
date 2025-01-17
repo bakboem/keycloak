@@ -16,6 +16,9 @@
  */
 package org.keycloak.services.resources.account;
 
+import jakarta.ws.rs.OPTIONS;
+import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.jboss.logging.Logger;
 import org.keycloak.http.HttpRequest;
 import org.keycloak.http.HttpResponse;
@@ -34,6 +37,7 @@ import org.keycloak.services.managers.AppAuthManager;
 import org.keycloak.services.managers.Auth;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.resource.AccountResourceProvider;
+import org.keycloak.services.util.UserSessionUtil;
 import org.keycloak.theme.Theme;
 
 import jakarta.ws.rs.HttpMethod;
@@ -85,7 +89,7 @@ public class AccountLoader {
         AccountResourceProvider accountResourceProvider = getAccountResourceProvider(theme);
         
         if (request.getHttpMethod().equals(HttpMethod.OPTIONS)) {
-            return new CorsPreflightService(request);
+            return new CorsPreflightService();
         } else if ((accepts.contains(MediaType.APPLICATION_JSON_TYPE) || MediaType.APPLICATION_JSON_TYPE.equals(content)) && !uriInfo.getPath().endsWith("keycloak.json")) {
             return getAccountRestService(client, null);
         } else if (accountResourceProvider != null) {
@@ -95,11 +99,21 @@ public class AccountLoader {
         }
     }
 
+    // Remove once Quarkus is upgraded to 3.15.3, or reconsidered to use this approach
+    // See https://github.com/keycloak/keycloak/issues/36009
+    @OPTIONS
+    @Path("{any:.*}")
+    @Operation(hidden = true)
+    public Response preFlight() {
+        return new CorsPreflightService().preflight();
+    }
+    // remove until here
+
     @Path("{version : v\\d[0-9a-zA-Z_\\-]*}")
     @Produces(MediaType.APPLICATION_JSON)
     public Object getVersionedAccountRestService(final @PathParam("version") String version) {
         if (request.getHttpMethod().equals(HttpMethod.OPTIONS)) {
-            return new CorsPreflightService(request);
+            return new CorsPreflightService();
         }
         return getAccountRestService(getAccountManagementClient(session.getContext().getRealm()), version);
     }
@@ -120,11 +134,14 @@ public class AccountLoader {
         }
 
         AccessToken accessToken = authResult.getToken();
+
+        UserSessionUtil.checkTokenIssuedAt(client.getRealm(), accessToken, authResult.getSession(), event, authResult.getClient());
+
         if (accessToken.getAudience() == null || accessToken.getResourceAccess(client.getClientId()) == null) {
             // transform for introspection to get the required claims
             AccessTokenIntrospectionProvider provider = (AccessTokenIntrospectionProvider) session.getProvider(TokenIntrospectionProvider.class,
                     AccessTokenIntrospectionProviderFactory.ACCESS_TOKEN_TYPE);
-            accessToken = provider.transformAccessToken(accessToken);
+            accessToken = provider.transformAccessToken(accessToken, authResult.getSession());
         }
 
         if (!accessToken.hasAudience(client.getClientId())) {
@@ -133,7 +150,7 @@ public class AccountLoader {
 
         Auth auth = new Auth(session.getContext().getRealm(), accessToken, authResult.getUser(), client, authResult.getSession(), false);
 
-        Cors.add(request).allowedOrigins(auth.getToken()).allowedMethods("GET", "PUT", "POST", "DELETE").auth().build(response);
+        Cors.builder().allowedOrigins(auth.getToken()).allowedMethods("GET", "PUT", "POST", "DELETE").auth().add();
 
         if (authResult.getUser().getServiceAccountClientLink() != null) {
             throw new NotAuthorizedException("Service accounts are not allowed to access this service");

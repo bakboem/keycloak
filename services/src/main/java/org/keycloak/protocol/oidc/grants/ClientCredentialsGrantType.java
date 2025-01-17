@@ -29,7 +29,6 @@ import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.models.ClientSessionContext;
-import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
@@ -42,8 +41,6 @@ import org.keycloak.services.clientpolicy.context.ServiceAccountTokenRequestCont
 import org.keycloak.services.clientpolicy.context.ServiceAccountTokenResponseContext;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.managers.AuthenticationSessionManager;
-import org.keycloak.services.managers.ClientManager;
-import org.keycloak.services.managers.RealmManager;
 import org.keycloak.services.managers.UserSessionManager;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
@@ -62,27 +59,29 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
     @Override
     public Response process(Context context) {
         setContext(context);
-        
+
         if (client.isBearerOnly()) {
+            event.detail(Details.REASON, "Bearer-only client not allowed to retrieve service account");
             event.error(Errors.INVALID_CLIENT);
             throw new CorsErrorResponseException(cors, OAuthErrorException.UNAUTHORIZED_CLIENT, "Bearer-only client not allowed to retrieve service account", Response.Status.UNAUTHORIZED);
         }
         if (client.isPublicClient()) {
+            event.detail(Details.REASON, "Public client not allowed to retrieve service account");
             event.error(Errors.INVALID_CLIENT);
             throw new CorsErrorResponseException(cors, OAuthErrorException.UNAUTHORIZED_CLIENT, "Public client not allowed to retrieve service account", Response.Status.UNAUTHORIZED);
         }
         if (!client.isServiceAccountsEnabled()) {
+            event.detail(Details.REASON, "Client not enabled to retrieve service account");
             event.error(Errors.INVALID_CLIENT);
             throw new CorsErrorResponseException(cors, OAuthErrorException.UNAUTHORIZED_CLIENT, "Client not enabled to retrieve service account", Response.Status.UNAUTHORIZED);
         }
 
         UserModel clientUser = session.users().getServiceAccount(client);
-
-        if (clientUser == null || client.getProtocolMapperByName(OIDCLoginProtocol.LOGIN_PROTOCOL, ServiceAccountConstants.CLIENT_ID_PROTOCOL_MAPPER) == null) {
-            // May need to handle bootstrap here as well
-            logger.debugf("Service account user for client '%s' not found or default protocol mapper for service account not found. Creating now", client.getClientId());
-            new ClientManager(new RealmManager(session)).enableServiceAccount(client);
-            clientUser = session.users().getServiceAccount(client);
+        if (clientUser == null) {
+            event.detail(Details.REASON, "The associated service account for the client does not exist");
+            event.error(Errors.USER_NOT_FOUND);
+            throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_REQUEST,
+                    "The associated service account for the client does not exist", Response.Status.UNAUTHORIZED);
         }
 
         String clientUsername = clientUser.getUsername();
@@ -90,6 +89,7 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         event.user(clientUser);
 
         if (!clientUser.isEnabled()) {
+            event.detail(Details.REASON, "User '" + clientUsername + "' disabled");
             event.error(Errors.USER_DISABLED);
             throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_REQUEST, "User '" + clientUsername + "' disabled", Response.Status.UNAUTHORIZED);
         }
@@ -103,6 +103,7 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         authSession.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
         authSession.setClientNote(OIDCLoginProtocol.ISSUER, Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName()));
         authSession.setClientNote(OIDCLoginProtocol.SCOPE_PARAM, scope);
+        setAuthorizationDetailsNoteIfIncluded(authSession);
 
         // persisting of userSession by default
         UserSessionModel.SessionPersistenceState sessionPersistenceState = UserSessionModel.SessionPersistenceState.PERSISTENT;
@@ -117,7 +118,7 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
                 clientConnection.getRemoteAddr(), ServiceAccountConstants.CLIENT_AUTH, false, null, null, sessionPersistenceState);
         event.session(userSession);
 
-        AuthenticationManager.setClientScopesInSession(authSession);
+        AuthenticationManager.setClientScopesInSession(session, authSession);
         ClientSessionContext clientSessionCtx = TokenManager.attachAuthenticationSession(session, userSession, authSession);
 
         // Notes about client details
@@ -129,6 +130,7 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         try {
             session.clientPolicy().triggerOnEvent(new ServiceAccountTokenRequestContext(formParams, clientSessionCtx.getClientSession()));
         } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, cpe.getErrorDetail());
             event.error(cpe.getError());
             throw new CorsErrorResponseException(cors, cpe.getError(), cpe.getErrorDetail(), Response.Status.BAD_REQUEST);
         }
@@ -141,8 +143,12 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         // Make refresh token generation optional, see KEYCLOAK-9551
         if (useRefreshToken) {
             responseBuilder = responseBuilder.generateRefreshToken();
+            if (TokenUtil.TOKEN_TYPE_OFFLINE.equals(responseBuilder.getRefreshToken().getType())) {
+                // for client credentials the online session can be removed
+                session.sessions().removeUserSession(realm, userSession);
+            }
         } else {
-            responseBuilder.getAccessToken().setSessionState(null);
+            responseBuilder.getAccessToken().setSessionId(null);
         }
 
         checkAndBindMtlsHoKToken(responseBuilder, useRefreshToken);
@@ -155,6 +161,7 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         try {
             session.clientPolicy().triggerOnEvent(new ServiceAccountTokenResponseContext(formParams, clientSessionCtx.getClientSession(), responseBuilder));
         } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, cpe.getErrorDetail());
             event.error(cpe.getError());
             throw new CorsErrorResponseException(cors, cpe.getError(), cpe.getErrorDetail(), Response.Status.BAD_REQUEST);
         }
@@ -164,6 +171,8 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         try {
             res = responseBuilder.build();
         } catch (RuntimeException re) {
+            event.detail(Details.REASON, re.getMessage());
+            event.error(Errors.INVALID_REQUEST);
             if ("can not get encryption KEK".equals(re.getMessage())) {
                 throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_REQUEST,
                         "can not get encryption KEK", Response.Status.BAD_REQUEST);
@@ -173,7 +182,7 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         }
         event.success();
 
-        return cors.builder(Response.ok(res, MediaType.APPLICATION_JSON_TYPE)).build();
+        return cors.add(Response.ok(res, MediaType.APPLICATION_JSON_TYPE));
     }
 
     @Override
@@ -181,4 +190,14 @@ public class ClientCredentialsGrantType extends OAuth2GrantTypeBase {
         return EventType.CLIENT_LOGIN;
     }
 
+    /**
+     * Setting a client note with authorization_details to support custom protocol mappers using RAR (Rich Authorization Request)
+     * until RAR is fully implemented.
+     */
+    private void setAuthorizationDetailsNoteIfIncluded(AuthenticationSessionModel authSession) {
+        String authorizationDetails = formParams.getFirst(OIDCLoginProtocol.AUTHORIZATION_DETAILS_PARAM);
+        if (authorizationDetails != null) {
+            authSession.setClientNote(OIDCLoginProtocol.AUTHORIZATION_DETAILS_PARAM, authorizationDetails);
+        }
+    }
 }

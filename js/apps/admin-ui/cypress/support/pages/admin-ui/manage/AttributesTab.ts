@@ -1,5 +1,5 @@
 export default class AttributesTab {
-  #saveAttributeBtn = "save-attributes";
+  #saveAttributeBtn = "attributes-save";
   #attributesTab = "attributes";
   #emptyState = "attributes-empty-state";
   #addAttributeBtn: string;
@@ -56,7 +56,7 @@ export default class AttributesTab {
   }
 
   public revert() {
-    cy.get(".pf-c-button.pf-m-link").contains("Revert").click();
+    cy.get(".pf-v5-c-button.pf-m-link").contains("Revert").click();
     return this;
   }
 

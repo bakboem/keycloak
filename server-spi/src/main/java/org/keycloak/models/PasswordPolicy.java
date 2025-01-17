@@ -33,11 +33,7 @@ public class PasswordPolicy implements Serializable {
 
     public static final String HASH_ALGORITHM_ID = "hashAlgorithm";
 
-    public static final String HASH_ALGORITHM_DEFAULT = "pbkdf2-sha512";
-
     public static final String HASH_ITERATIONS_ID = "hashIterations";
-
-    public static final int HASH_ITERATIONS_DEFAULT = 210_000;
 
     public static final String PASSWORD_HISTORY_ID = "passwordHistory";
 
@@ -48,6 +44,8 @@ public class PasswordPolicy implements Serializable {
     public static final String RECOVERY_CODES_WARNING_THRESHOLD_ID = "recoveryCodesWarningThreshold";
 
     public static final String MAX_AUTH_AGE_ID = "maxAuthAge";
+
+    public static final String PASSWORD_AGE = "passwordAge";
 
     private Map<String, Object> policyConfig;
     private Builder builder;
@@ -81,7 +79,7 @@ public class PasswordPolicy implements Serializable {
         if (policyConfig.containsKey(HASH_ALGORITHM_ID)) {
             return getPolicyConfig(HASH_ALGORITHM_ID);
         } else {
-            return HASH_ALGORITHM_DEFAULT;
+            return null;
         }
     }
 
@@ -96,6 +94,14 @@ public class PasswordPolicy implements Serializable {
     public int getExpiredPasswords() {
         if (policyConfig.containsKey(PASSWORD_HISTORY_ID)) {
             return getPolicyConfig(PASSWORD_HISTORY_ID);
+        } else {
+            return -1;
+        }
+    }
+
+    public int getPasswordAgeInDays() {
+        if (policyConfig.containsKey(PASSWORD_AGE)) {
+            return getPolicyConfig(PASSWORD_AGE);
         } else {
             return -1;
         }

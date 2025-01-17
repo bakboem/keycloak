@@ -19,6 +19,9 @@ package org.keycloak.testsuite.admin.authentication;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.keycloak.admin.client.CreatedResponseUtil;
+import org.keycloak.admin.client.resource.ClientResource;
+import org.keycloak.admin.client.resource.IdentityProviderResource;
 import org.keycloak.authentication.authenticators.browser.IdentityProviderAuthenticatorFactory;
 import org.keycloak.common.util.StreamUtil;
 import org.keycloak.events.admin.OperationType;
@@ -28,7 +31,10 @@ import org.keycloak.representations.idm.AuthenticationExecutionExportRepresentat
 import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
 import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
 import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
+import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.OAuth2ErrorRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.util.AdminEventPaths;
 import org.keycloak.testsuite.util.ContainerAssume;
@@ -37,24 +43,29 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.endsWith;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.fail;
 import static org.keycloak.testsuite.util.Matchers.body;
 import static org.keycloak.testsuite.util.Matchers.statusCodeIs;
@@ -70,7 +81,7 @@ public class FlowTest extends AbstractAuthenticationTest {
         createFlow(newFlow("Foo", "Foo flow", "generic", true, false));
         addFlowToParent("Foo", "child");
         addFlowToParent("child", "grandchild");
-        
+
         List<AuthenticationFlowRepresentation> flows = authMgmtResource.getFlows();
         AuthenticationFlowRepresentation found = findFlowByAlias("Foo", flows);
         authMgmtResource.deleteFlow(found.getId());
@@ -78,7 +89,7 @@ public class FlowTest extends AbstractAuthenticationTest {
 
         createFlow(newFlow("Foo", "Foo flow", "generic", true, false));
         addFlowToParent("Foo", "child");
-        
+
         // Under the old code, this would throw an error because "grandchild"
         // was left in the database
         addFlowToParent("child", "grandchild");
@@ -106,21 +117,28 @@ public class FlowTest extends AbstractAuthenticationTest {
 
         authMgmtResource.deleteFlow(findFlowByAlias("Foo", authMgmtResource.getFlows()).getId());
     }
-    
+
     private void addFlowToParent(String parentAlias, String childAlias) {
-        Map<String, String> data = new HashMap<>();
+        Map<String, Object> data = new HashMap<>();
         data.put("alias", childAlias);
         data.put("type", "generic");
         data.put("description", childAlias + " flow");
         authMgmtResource.addExecutionFlow(parentAlias, data);
     }
-    
+
     @Test
     public void testAddFlowWithRestrictedCharInAlias() {
         Response resp = authMgmtResource.createFlow(newFlow("fo]o", "Browser flow", "basic-flow", true, false));
         Assert.assertEquals(400, resp.getStatus());
+
+        try {
+            CreatedResponseUtil.getCreatedId(resp);
+            Assert.fail("Not expected getCreatedId to success");
+        } catch (WebApplicationException wae) {
+            Assert.assertThat(wae.getMessage(), endsWith("Error: Character ']' not allowed."));
+        }
     }
-    
+
     @Test
     public void testAddRemoveFlow() {
 
@@ -179,14 +197,14 @@ public class FlowTest extends AbstractAuthenticationTest {
 
 
         // add execution flow to some parent flow
-        Map<String, String> data = new HashMap<>();
+        Map<String, Object> data = new HashMap<>();
         data.put("alias", "SomeFlow");
         data.put("type", "basic-flow");
         data.put("description", "Test flow");
         // This tests against a regression in KEYCLOAK-16656
         data.put("provider", "registration-page-form");
 
-        Map<String, String> data2 = new HashMap<>();
+        Map<String, Object> data2 = new HashMap<>();
         data2.put("alias", "SomeFlow2");
         data2.put("type", "form-flow");
         data2.put("description", "Test flow 2");
@@ -261,11 +279,102 @@ public class FlowTest extends AbstractAuthenticationTest {
         }
     }
 
+    @Test
+    public void testRemoveUsedFlow() {
+        String flowAlias = "test";
+        String flowId = createFlow(newFlow(flowAlias, "Test flow", "generic", true, false));
+
+        Runnable assertRemoveFail = () -> {
+            try {
+                authMgmtResource.deleteFlow(flowId);
+                Assert.fail("Not expected to delete flow that is in use.");
+            } catch (WebApplicationException e) {
+                OAuth2ErrorRepresentation error = e.getResponse().readEntity(OAuth2ErrorRepresentation.class);
+                Assert.assertEquals("For more on this error consult the server log.", error.getErrorDescription());
+            }
+        };
+
+        {
+            // used in realm flow
+            RealmRepresentation realm = realmResource.toRepresentation();
+            BiConsumer<Supplier<String>, Consumer<String>> assertRemoveFailInRealm =
+                    (rollbackFlow, updateFlow) -> {
+                        String rollbackValue = rollbackFlow.get();
+                        try {
+                            updateFlow.accept(flowAlias);
+                            realmResource.update(realm);
+
+                            assertRemoveFail.run();
+                        } finally {
+                            updateFlow.accept(rollbackValue);
+                            realmResource.update(realm);
+                        }
+                    };
+
+            assertRemoveFailInRealm.accept(realm::getBrowserFlow, realm::setBrowserFlow);
+            assertRemoveFailInRealm.accept(realm::getRegistrationFlow, realm::setRegistrationFlow);
+            assertRemoveFailInRealm.accept(realm::getClientAuthenticationFlow, realm::setClientAuthenticationFlow);
+            assertRemoveFailInRealm.accept(realm::getDirectGrantFlow, realm::setDirectGrantFlow);
+            assertRemoveFailInRealm.accept(realm::getResetCredentialsFlow, realm::setResetCredentialsFlow);
+            assertRemoveFailInRealm.accept(realm::getDockerAuthenticationFlow, realm::setDockerAuthenticationFlow);
+            assertRemoveFailInRealm.accept(realm::getFirstBrokerLoginFlow, realm::setFirstBrokerLoginFlow);
+        }
+
+        {
+            // used by client override
+            ClientRepresentation client = realmResource.clients().findByClientId("account").get(0);
+            ClientResource clientResource = realmResource.clients().get(client.getId());
+
+            try {
+                client.setAuthenticationFlowBindingOverrides(
+                        Map.of("browser", flowId)
+                );
+                clientResource.update(client);
+
+                assertRemoveFail.run();
+            } finally {
+                client.setAuthenticationFlowBindingOverrides(
+                        Map.of("browser", "")
+                );
+                clientResource.update(client);
+            }
+        }
+
+        {
+            // used by idp override
+            IdentityProviderRepresentation idp = new IdentityProviderRepresentation();
+            idp.setAlias("idp");
+            idp.setProviderId("oidc");
+
+            Response response = realmResource.identityProviders().create(idp);
+            Assert.assertNotNull(ApiUtil.getCreatedId(response));
+            response.close();
+            getCleanup().addIdentityProviderAlias(idp.getAlias());
+
+            IdentityProviderResource idpResource = realmResource.identityProviders().get("idp");
+            BiConsumer<Supplier<String>, Consumer<String>> assertRemoveFailByIdp =
+                    (rollbackIdp, updateIdp) -> {
+                        String rollbackValue = rollbackIdp.get();
+                        try {
+                            updateIdp.accept(flowAlias);
+                            idpResource.update(idp);
+
+                            assertRemoveFail.run();
+                        } finally {
+                            updateIdp.accept(rollbackValue);
+                            idpResource.update(idp);
+                        }
+                    };
+
+            assertRemoveFailByIdp.accept(idp::getFirstBrokerLoginFlowAlias, idp::setFirstBrokerLoginFlowAlias);
+            assertRemoveFailByIdp.accept(idp::getPostBrokerLoginFlowAlias, idp::setPostBrokerLoginFlowAlias);
+        }
+    }
 
     @Test
     public void testCopyFlow() {
 
-        HashMap<String, String> params = new HashMap<>();
+        HashMap<String, Object> params = new HashMap<>();
         params.put("newName", "clients");
 
         // copy using existing alias as new name
@@ -308,7 +417,8 @@ public class FlowTest extends AbstractAuthenticationTest {
         // adjust expected values before comparing
         browser.setAlias("Copy of browser");
         browser.setBuiltIn(false);
-        browser.getAuthenticationExecutions().get(3).setFlowAlias("Copy of browser forms");
+        browser.getAuthenticationExecutions().get(3).setFlowAlias("Copy of browser Organization");
+        browser.getAuthenticationExecutions().get(4).setFlowAlias("Copy of browser forms");
         compareFlows(browser, copyOfBrowser);
 
         // get new flow directly and compare
@@ -321,7 +431,7 @@ public class FlowTest extends AbstractAuthenticationTest {
     @Test
     // KEYCLOAK-2580
     public void addExecutionFlow() {
-        HashMap<String, String> params = new HashMap<>();
+        HashMap<String, Object> params = new HashMap<>();
         params.put("newName", "parent");
         Response response = authMgmtResource.copy("browser", params);
         Assert.assertEquals(201, response.getStatus());
@@ -347,7 +457,7 @@ public class FlowTest extends AbstractAuthenticationTest {
         List<AuthenticationFlowRepresentation> flows;
 
         //copy an existing one first
-        HashMap<String, String> params = new HashMap<>();
+        HashMap<String, Object> params = new HashMap<>();
         params.put("newName", "Copy of browser");
         Response response = authMgmtResource.copy("browser", params);
         assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authCopyFlowPath("browser"), params, ResourceType.AUTH_FLOW);
@@ -423,7 +533,7 @@ public class FlowTest extends AbstractAuthenticationTest {
 
     @Test
     public void editExecutionFlowTest() {
-        HashMap<String, String> params = new HashMap<>();
+        HashMap<String, Object> params = new HashMap<>();
         List<AuthenticationExecutionInfoRepresentation> executionReps;
         //create new parent flow
         AuthenticationFlowRepresentation newFlow = newFlow("Parent-Flow", "This is a parent flow", "basic-flow", true, false);
@@ -484,6 +594,66 @@ public class FlowTest extends AbstractAuthenticationTest {
     }
 
     @Test
+    public void prioritySetTest() {
+        //create new parent flow
+        AuthenticationFlowRepresentation newFlow = newFlow("Parent-Flow", "This is a parent flow", "basic-flow", true, false);
+        createFlow(newFlow);
+
+        HashMap<String, Object> params = new HashMap<>();
+        params.put("alias", "Child-Flow1");
+        params.put("description", "This is a child flow");
+        params.put("provider", "registration-page-form");
+        params.put("type", "basic-flow");
+        params.put("priority", 50);
+
+        authMgmtResource.addExecutionFlow("Parent-Flow", params);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authAddExecutionFlowPath("Parent-Flow"), params, ResourceType.AUTH_EXECUTION_FLOW);
+
+        params.clear();
+        params.put("alias", "Child-Flow2");
+        params.put("description", "This is a second child flow");
+        params.put("provider", "registration-page-form");
+        params.put("type", "basic-flow");
+        params.put("priority", 10);
+
+        authMgmtResource.addExecutionFlow("Parent-Flow", params);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authAddExecutionFlowPath("Parent-Flow"), params, ResourceType.AUTH_EXECUTION_FLOW);
+
+        params.clear();
+        params.put("alias", "Child-Flow3");
+        params.put("description", "This is a third child flow");
+        params.put("provider", "registration-page-form");
+        params.put("type", "basic-flow");
+        params.put("priority", 20);
+
+        authMgmtResource.addExecutionFlow("Parent-Flow", params);
+        assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authAddExecutionFlowPath("Parent-Flow"), params, ResourceType.AUTH_EXECUTION_FLOW);
+
+        List<AuthenticationExecutionInfoRepresentation> executionReps = authMgmtResource.getExecutions("Parent-Flow");
+        // Verify the initial order and priority value
+        Assert.assertEquals("Child-Flow2", executionReps.get(0).getDisplayName());
+        Assert.assertEquals(10, executionReps.get(0).getPriority());
+        Assert.assertEquals("Child-Flow3", executionReps.get(1).getDisplayName());
+        Assert.assertEquals(20, executionReps.get(1).getPriority());
+        Assert.assertEquals("Child-Flow1", executionReps.get(2).getDisplayName());
+        Assert.assertEquals(50, executionReps.get(2).getPriority());
+
+        // Move last execution to the beginning
+        AuthenticationExecutionInfoRepresentation lastToFirst = executionReps.get(2);
+        lastToFirst.setPriority(5);
+        authMgmtResource.updateExecutions("Parent-Flow", lastToFirst);
+        executionReps = authMgmtResource.getExecutions("Parent-Flow");
+
+        // Verify new order and priority
+        Assert.assertEquals("Child-Flow1", executionReps.get(0).getDisplayName());
+        Assert.assertEquals(5, executionReps.get(0).getPriority());
+        Assert.assertEquals("Child-Flow2", executionReps.get(1).getDisplayName());
+        Assert.assertEquals(10, executionReps.get(1).getPriority());
+        Assert.assertEquals("Child-Flow3", executionReps.get(2).getDisplayName());
+        Assert.assertEquals(20, executionReps.get(2).getPriority());
+    }
+
+    @Test
     public void failWithLongDescription() throws IOException {
         ContainerAssume.assumeAuthServerQuarkus();
         AuthenticationFlowRepresentation rep = authMgmtResource.getFlows().stream()
@@ -510,7 +680,7 @@ public class FlowTest extends AbstractAuthenticationTest {
         } catch (InternalServerErrorException isee) {
             try (Response response = isee.getResponse()) {
                 assertEquals(500, response.getStatus());
-                assertFalse(StreamUtil.readString((InputStream) response.getEntity(), Charset.forName("UTF-8")).toLowerCase().contains("exception"));
+                assertFalse(StreamUtil.readString((InputStream) response.getEntity(), StandardCharsets.UTF_8).toLowerCase().contains("exception"));
             }
         } catch (Exception e) {
             fail("Unexpected exception");
@@ -525,7 +695,7 @@ public class FlowTest extends AbstractAuthenticationTest {
         Assert.assertNotNull("There is no builtin flow", flow);
 
         // adding an execution should fail
-        Map<String, String> data = new HashMap<>();
+        Map<String, Object> data = new HashMap<>();
         data.put("provider", "allow-access-authenticator");
         BadRequestException e = Assert.assertThrows(BadRequestException.class, () -> authMgmtResource.addExecution(flow.getAlias(), data));
         OAuth2ErrorRepresentation error = e.getResponse().readEntity(OAuth2ErrorRepresentation.class);
@@ -575,11 +745,11 @@ public class FlowTest extends AbstractAuthenticationTest {
 
         try (Response response = authMgmtResource.newExecutionConfig(executionWithConfig.getId(), executionConfig)) {
             getCleanup().addAuthenticationConfigId(ApiUtil.getCreatedId(response));
-            assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authAddExecutionConfigPath(executionWithConfig.getId()), executionConfig, ResourceType.AUTH_EXECUTION);
+            assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authAddExecutionConfigPath(executionWithConfig.getId()), executionConfig, ResourceType.AUTHENTICATOR_CONFIG);
         }
 
         String newFlowName = "Duplicated of " + DefaultAuthenticationFlows.BROWSER_FLOW;
-        Map<String, String> copyFlowParams = Map.of("newName", newFlowName);
+        Map<String, Object> copyFlowParams = Map.of("newName", newFlowName);
         authMgmtResource.copy(existingFlow.getAlias(), copyFlowParams).close();
         assertAdminEvents.assertEvent(testRealmId, OperationType.CREATE, AdminEventPaths.authCopyFlowPath("browser"), copyFlowParams, ResourceType.AUTH_FLOW);
 

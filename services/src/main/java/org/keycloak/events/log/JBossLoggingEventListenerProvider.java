@@ -90,10 +90,16 @@ public class JBossLoggingEventListenerProvider implements EventListenerProvider 
             sanitize(sb, event.getType().toString());
             sb.append(", realmId=");
             sanitize(sb, event.getRealmId());
+            sb.append(", realmName=");
+            sanitize(sb, event.getRealmName());
             sb.append(", clientId=");
             sanitize(sb, event.getClientId());
             sb.append(", userId=");
             sanitize(sb, event.getUserId());
+            if (event.getSessionId() != null) {
+                sb.append(", sessionId=");
+                sanitize(sb, event.getSessionId());
+            }
             sb.append(", ipAddress=");
             sanitize(sb, event.getIpAddress());
 
@@ -141,6 +147,8 @@ public class JBossLoggingEventListenerProvider implements EventListenerProvider 
             sanitize(sb, adminEvent.getOperationType().toString());
             sb.append(", realmId=");
             sanitize(sb, adminEvent.getAuthDetails().getRealmId());
+            sb.append(", realmName=");
+            sanitize(sb, adminEvent.getAuthDetails().getRealmName());
             sb.append(", clientId=");
             sanitize(sb, adminEvent.getAuthDetails().getClientId());
             sb.append(", userId=");
@@ -157,6 +165,15 @@ public class JBossLoggingEventListenerProvider implements EventListenerProvider 
                 sanitize(sb, adminEvent.getError());
             }
 
+            if (adminEvent.getDetails() != null) {
+                for (Map.Entry<String, String> e : adminEvent.getDetails().entrySet()) {
+                    sb.append(", ");
+                    sb.append(StringUtil.sanitizeSpacesAndQuotes(e.getKey(), null));
+                    sb.append("=");
+                    sanitize(sb, e.getValue());
+                }
+            }
+
             if(logger.isTraceEnabled()) {
                 setKeycloakContext(sb);
             }
@@ -168,7 +185,7 @@ public class JBossLoggingEventListenerProvider implements EventListenerProvider 
     @Override
     public void close() {
     }
-    
+
     private void setKeycloakContext(StringBuilder sb) {
         KeycloakContext context = session.getContext();
         UriInfo uriInfo = context.getUri();
@@ -191,7 +208,7 @@ public class JBossLoggingEventListenerProvider implements EventListenerProvider 
             }
             sb.append("]");
         }
-        
+
     }
 
 }

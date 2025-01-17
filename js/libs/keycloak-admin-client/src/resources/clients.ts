@@ -29,6 +29,7 @@ export interface ClientQuery extends PaginatedQuery {
   clientId?: string;
   viewableOnly?: boolean;
   search?: boolean;
+  q?: string;
 }
 
 export interface ResourceQuery extends PaginatedQuery {
@@ -138,7 +139,13 @@ export class Clients extends Resource<{ realm?: string }> {
   });
 
   public findUsersWithRole = this.makeRequest<
-    { id: string; roleName: string; first?: number; max?: number },
+    {
+      id: string;
+      roleName: string;
+      briefRepresentation?: boolean;
+      first?: number;
+      max?: number;
+    },
     UserRepresentation[]
   >({
     method: "GET",

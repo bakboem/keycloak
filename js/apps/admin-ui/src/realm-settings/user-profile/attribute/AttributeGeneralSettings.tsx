@@ -1,38 +1,39 @@
 import type ClientScopeRepresentation from "@keycloak/keycloak-admin-client/lib/defs/clientScopeRepresentation";
 import type { UserProfileConfig } from "@keycloak/keycloak-admin-client/lib/defs/userProfileMetadata";
-import type RealmRepresentation from "@keycloak/keycloak-admin-client/lib/defs/realmRepresentation";
 import {
-  Button,
+  HelpItem,
+  KeycloakSelect,
+  KeycloakSpinner,
+  SelectControl,
+  SelectVariant,
+  TextControl,
+  useFetch,
+} from "@keycloak/keycloak-ui-shared";
+import {
   Divider,
   FormGroup,
-  Grid,
-  GridItem,
   Radio,
-  Select,
   SelectOption,
-  SelectVariant,
   Switch,
-  Tooltip,
 } from "@patternfly/react-core";
 import { isEqual } from "lodash-es";
-import { useEffect, useRef, useState } from "react";
-import { Controller, useFormContext, useWatch } from "react-hook-form";
+import { useState } from "react";
+import {
+  Controller,
+  FormProvider,
+  useFormContext,
+  useWatch,
+} from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { HelpItem } from "ui-shared";
-
-import { adminClient } from "../../../admin-client";
+import { useAdminClient } from "../../../admin-client";
 import { FormAccess } from "../../../components/form/FormAccess";
-import { KeycloakSpinner } from "../../../components/keycloak-spinner/KeycloakSpinner";
-import { KeycloakTextInput } from "../../../components/keycloak-text-input/KeycloakTextInput";
-import { useFetch } from "../../../utils/useFetch";
+import { DefaultSwitchControl } from "../../../components/SwitchControl";
 import { useParams } from "../../../utils/useParams";
 import { USERNAME_EMAIL } from "../../NewAttributeSettings";
-import "../../realm-settings-section.css";
-import { GlobeRouteIcon } from "@patternfly/react-icons";
-import { AddTranslationsDialog } from "./AddTranslationsDialog";
-import useToggle from "../../../utils/useToggle";
 import { AttributeParams } from "../../routes/Attribute";
-import { useRealm } from "../../../context/realm-context/RealmContext";
+import { TranslatableField } from "./TranslatableField";
+
+import "../../realm-settings-section.css";
 
 const REQUIRED_FOR = [
   { label: "requiredForLabel.both", value: ["admin", "user"] },
@@ -40,61 +41,17 @@ const REQUIRED_FOR = [
   { label: "requiredForLabel.admins", value: ["admin"] },
 ] as const;
 
-type TranslationForm = {
-  locale: string;
-  value: string;
-};
-
-type Translations = {
-  key: string;
-  translations: TranslationForm[];
-};
-
-export type AttributeGeneralSettingsProps = {
-  onHandlingTranslationData: (data: Translations) => void;
-  onHandlingGeneratedDisplayName: (displayName: string) => void;
-};
-
-export const AttributeGeneralSettings = ({
-  onHandlingTranslationData,
-  onHandlingGeneratedDisplayName,
-}: AttributeGeneralSettingsProps) => {
+export const AttributeGeneralSettings = () => {
+  const { adminClient } = useAdminClient();
   const { t } = useTranslation();
-  const { realm: realmName } = useRealm();
   const form = useFormContext();
-  const tooltipRef = useRef();
   const [clientScopes, setClientScopes] =
     useState<ClientScopeRepresentation[]>();
   const [config, setConfig] = useState<UserProfileConfig>();
   const [selectEnabledWhenOpen, setSelectEnabledWhenOpen] = useState(false);
   const [selectRequiredForOpen, setSelectRequiredForOpen] = useState(false);
-  const [isAttributeGroupDropdownOpen, setIsAttributeGroupDropdownOpen] =
-    useState(false);
-  const [addTranslationsModalOpen, toggleModal] = useToggle();
   const { attributeName } = useParams<AttributeParams>();
   const editMode = attributeName ? true : false;
-  const [realm, setRealm] = useState<RealmRepresentation>();
-  const [newAttributeName, setNewAttributeName] = useState("");
-  const [generatedDisplayName, setGeneratedDisplayName] = useState("");
-  const [translationsData, setTranslationsData] = useState<Translations>({
-    key: "",
-    translations: [],
-  });
-  const displayNameRegex = /\$\{([^}]+)\}/;
-
-  const handleAttributeNameChange = (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const newAttributeName = event.target.value;
-    setNewAttributeName(newAttributeName);
-
-    const newDisplayName =
-      newAttributeName !== "" && realm?.internationalizationEnabled
-        ? "${profile.attributes." + `${newAttributeName}}`
-        : "";
-
-    setGeneratedDisplayName(newDisplayName);
-  };
 
   const hasSelector = useWatch({
     control: form.control,
@@ -112,39 +69,8 @@ export const AttributeGeneralSettings = ({
     defaultValue: false,
   });
 
-  const attributeDisplayName = useWatch({
-    control: form.control,
-    name: "displayName",
-  });
-
-  const displayNamePatternMatch = displayNameRegex.test(attributeDisplayName);
-
-  useFetch(
-    () => adminClient.realms.findOne({ realm: realmName }),
-    (realm) => {
-      if (!realm) {
-        throw new Error(t("notFound"));
-      }
-      setRealm(realm);
-    },
-    [],
-  );
-
   useFetch(() => adminClient.clientScopes.find(), setClientScopes, []);
   useFetch(() => adminClient.users.getProfile(), setConfig, []);
-
-  const handleTranslationsData = (translationsData: Translations) => {
-    onHandlingTranslationData(translationsData);
-  };
-
-  const handleGeneratedDisplayName = (displayName: string) => {
-    onHandlingGeneratedDisplayName(displayName);
-  };
-
-  useEffect(() => {
-    handleTranslationsData(translationsData);
-    handleGeneratedDisplayName(generatedDisplayName);
-  }, [translationsData, generatedDisplayName]);
 
   if (!clientScopes) {
     return <KeycloakSpinner />;
@@ -158,57 +84,18 @@ export const AttributeGeneralSettings = ({
     form.setValue("hasRequiredScopes", hasRequiredScopes);
   }
 
-  const handleTranslationsAdded = (translationsData: Translations) => {
-    setTranslationsData(translationsData);
-  };
-
-  const handleToggleDialog = () => {
-    toggleModal();
-    handleTranslationsData(translationsData);
-    handleGeneratedDisplayName(generatedDisplayName);
-  };
-
   return (
-    <>
-      {addTranslationsModalOpen && (
-        <AddTranslationsDialog
-          translationKey={
-            editMode
-              ? attributeDisplayName
-              : "${profile.attributes." + `${newAttributeName}}`
-          }
-          onTranslationsAdded={handleTranslationsAdded}
-          toggleDialog={handleToggleDialog}
-          onCancel={() => {
-            toggleModal();
+    <FormProvider {...form}>
+      <FormAccess role="manage-realm" isHorizontal>
+        <TextControl
+          name="name"
+          label={t("attributeName")}
+          labelIcon={t("upAttributeNameHelp")}
+          isDisabled={editMode}
+          rules={{
+            required: t("validateAttributeName"),
           }}
         />
-      )}
-      <FormAccess role="manage-realm" isHorizontal>
-        <FormGroup
-          label={t("attributeName")}
-          labelIcon={
-            <HelpItem
-              helpText={t("upAttributeNameHelp")}
-              fieldLabelId="attributeName"
-            />
-          }
-          fieldId="kc-attribute-name"
-          isRequired
-          validated={form.formState.errors.name ? "error" : "default"}
-          helperTextInvalid={t("validateAttributeName")}
-        >
-          <KeycloakTextInput
-            isRequired
-            id="kc-attribute-name"
-            defaultValue=""
-            data-testid="attribute-name"
-            isDisabled={editMode}
-            validated={form.formState.errors.name ? "error" : "default"}
-            {...form.register("name", { required: true })}
-            onChange={handleAttributeNameChange}
-          />
-        </FormGroup>
         <FormGroup
           label={t("attributeDisplayName")}
           labelIcon={
@@ -217,93 +104,34 @@ export const AttributeGeneralSettings = ({
               fieldLabelId="attributeDisplayName"
             />
           }
-          fieldId="kc-attribute-display-name"
+          fieldId="kc-attribute-displayName"
         >
-          <Grid hasGutter>
-            <GridItem span={realm?.internationalizationEnabled ? 11 : 12}>
-              <KeycloakTextInput
-                id="kc-attribute-display-name"
-                data-testid="attribute-display-name"
-                isDisabled={
-                  (realm?.internationalizationEnabled &&
-                    newAttributeName !== "") ||
-                  (editMode && displayNamePatternMatch)
-                }
-                value={
-                  editMode
-                    ? attributeDisplayName
-                    : realm?.internationalizationEnabled
-                      ? generatedDisplayName
-                      : undefined
-                }
-                {...form.register("displayName")}
-              />
-            </GridItem>
-            {realm?.internationalizationEnabled && (
-              <GridItem span={1}>
-                <Button
-                  ref={tooltipRef}
-                  variant="link"
-                  className="pf-m-plain kc-attribute-display-name-iconBtn"
-                  data-testid="addAttributeTranslationBtn"
-                  aria-label={t("addAttributeTranslationBtn")}
-                  isDisabled={!newAttributeName && !editMode}
-                  onClick={() => {
-                    toggleModal();
-                  }}
-                  icon={<GlobeRouteIcon />}
-                />
-                <Tooltip
-                  content={t("addAttributeTranslationTooltip")}
-                  reference={tooltipRef}
-                />
-              </GridItem>
-            )}
-          </Grid>
+          <TranslatableField
+            attributeName="name"
+            prefix="profile.attributes"
+            fieldName="displayName"
+          />
         </FormGroup>
-        <FormGroup
+        <DefaultSwitchControl
+          name="multivalued"
+          label={t("multivalued")}
+          labelIcon={t("multivaluedHelp")}
+        />
+        <SelectControl
+          name="group"
           label={t("attributeGroup")}
-          labelIcon={
-            <HelpItem
-              helpText={t("attributeGroupHelp")}
-              fieldLabelId="realm-setting:attributeGroup"
-            />
-          }
-          fieldId="kc-attributeGroup"
-        >
-          <Controller
-            name="group"
-            defaultValue=""
-            control={form.control}
-            render={({ field }) => (
-              <Select
-                toggleId="kc-attributeGroup"
-                aria-label={t("attributeGroup")}
-                onToggle={() =>
-                  setIsAttributeGroupDropdownOpen(!isAttributeGroupDropdownOpen)
-                }
-                isOpen={isAttributeGroupDropdownOpen}
-                onSelect={(_, value) => {
-                  field.onChange(value.toString());
-                  setIsAttributeGroupDropdownOpen(false);
-                }}
-                selections={[field.value || t("none")]}
-                variant={SelectVariant.single}
-              >
-                {[
-                  <SelectOption key="empty" value="">
-                    {t("none")}
-                  </SelectOption>,
-                  ...(config?.groups?.map((group) => (
-                    <SelectOption key={group.name} value={group.name}>
-                      {group.name}
-                    </SelectOption>
-                  )) || []),
-                ]}
-              </Select>
-            )}
-          ></Controller>
-        </FormGroup>
+          labelIcon={t("attributeGroupHelp")}
+          controller={{
+            defaultValue: "",
+          }}
+          options={[
+            { key: "", value: t("none") },
+            ...(config?.groups?.map((g) => ({
+              key: g.name!,
+              value: g.name!,
+            })) || []),
+          ]}
+        />
         {!USERNAME_EMAIL.includes(attributeName) && (
           <>
             <Divider />
@@ -325,7 +153,7 @@ export const AttributeGeneralSettings = ({
                 name="enabledWhen"
                 label={t("always")}
                 onChange={() => setHasSelector(false)}
-                className="pf-u-mb-md"
+                className="pf-v5-u-mb-md"
               />
               <Radio
                 id="scopesAsRequested"
@@ -334,7 +162,7 @@ export const AttributeGeneralSettings = ({
                 name="enabledWhen"
                 label={t("scopesAsRequested")}
                 onChange={() => setHasSelector(true)}
-                className="pf-u-mb-md"
+                className="pf-v5-u-mb-md"
               />
             </FormGroup>
             {hasSelector && (
@@ -344,8 +172,7 @@ export const AttributeGeneralSettings = ({
                   control={form.control}
                   defaultValue={[]}
                   render={({ field }) => (
-                    <Select
-                      name="scopes"
+                    <KeycloakSelect
                       data-testid="enabled-when-scope-field"
                       variant={SelectVariant.typeaheadMulti}
                       typeAheadAriaLabel="Select"
@@ -356,7 +183,7 @@ export const AttributeGeneralSettings = ({
                       }}
                       onToggle={(isOpen) => setSelectEnabledWhenOpen(isOpen)}
                       selections={field.value}
-                      onSelect={(_, selectedValue) => {
+                      onSelect={(selectedValue) => {
                         const option = selectedValue.toString();
                         let changedValue = [""];
                         if (field.value) {
@@ -371,17 +198,18 @@ export const AttributeGeneralSettings = ({
 
                         field.onChange(changedValue);
                       }}
-                      onClear={(selectedValues) => {
-                        selectedValues.stopPropagation();
+                      onClear={() => {
                         field.onChange([]);
                       }}
                       isOpen={selectEnabledWhenOpen}
                       aria-labelledby={"scope"}
                     >
                       {clientScopes.map((option) => (
-                        <SelectOption key={option.name} value={option.name} />
+                        <SelectOption key={option.name} value={option.name}>
+                          {option.name}
+                        </SelectOption>
                       ))}
-                    </Select>
+                    </KeycloakSelect>
                   )}
                 />
               </FormGroup>
@@ -469,7 +297,7 @@ export const AttributeGeneralSettings = ({
                     name="requiredWhen"
                     label={t("always")}
                     onChange={() => setHasRequiredScopes(false)}
-                    className="pf-u-mb-md"
+                    className="pf-v5-u-mb-md"
                   />
                   <Radio
                     id="requiredScopesAsRequested"
@@ -478,7 +306,7 @@ export const AttributeGeneralSettings = ({
                     name="requiredWhen"
                     label={t("scopesAsRequested")}
                     onChange={() => setHasRequiredScopes(true)}
-                    className="pf-u-mb-md"
+                    className="pf-v5-u-mb-md"
                   />
                 </FormGroup>
                 {hasRequiredScopes && (
@@ -488,8 +316,7 @@ export const AttributeGeneralSettings = ({
                       control={form.control}
                       defaultValue={[]}
                       render={({ field }) => (
-                        <Select
-                          name="scopeRequired"
+                        <KeycloakSelect
                           data-testid="required-when-scope-field"
                           variant={SelectVariant.typeaheadMulti}
                           typeAheadAriaLabel="Select"
@@ -502,7 +329,7 @@ export const AttributeGeneralSettings = ({
                             setSelectRequiredForOpen(isOpen)
                           }
                           selections={field.value}
-                          onSelect={(_, selectedValue) => {
+                          onSelect={(selectedValue) => {
                             const option = selectedValue.toString();
                             let changedValue = [""];
                             if (field.value) {
@@ -516,20 +343,18 @@ export const AttributeGeneralSettings = ({
                             }
                             field.onChange(changedValue);
                           }}
-                          onClear={(selectedValues) => {
-                            selectedValues.stopPropagation();
+                          onClear={() => {
                             field.onChange([]);
                           }}
                           isOpen={selectRequiredForOpen}
                           aria-labelledby={"scope"}
                         >
                           {clientScopes.map((option) => (
-                            <SelectOption
-                              key={option.name}
-                              value={option.name}
-                            />
+                            <SelectOption key={option.name} value={option.name}>
+                              {option.name}
+                            </SelectOption>
                           ))}
-                        </Select>
+                        </KeycloakSelect>
                       )}
                     />
                   </FormGroup>
@@ -539,6 +364,6 @@ export const AttributeGeneralSettings = ({
           </>
         )}
       </FormAccess>
-    </>
+    </FormProvider>
   );
 };

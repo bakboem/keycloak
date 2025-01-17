@@ -2,18 +2,18 @@ import PageObject from "../../../../components/PageObject";
 
 export default class AdvancedTab extends PageObject {
   #clusterNodesExpandBtn =
-    ".pf-c-expandable-section .pf-c-expandable-section__toggle";
+    ".pf-v5-c-expandable-section .pf-v5-c-expandable-section__toggle";
   #testClusterAvailability = "#testClusterAvailability";
   #emptyClusterElement = "empty-state";
   #registerNodeManuallyBtn = "no-nodes-registered-empty-action";
   #deleteClusterNodeDrpDwn =
-    '[aria-label="Registered cluster nodes"] [aria-label="Actions"]';
+    '[aria-label="Registered cluster nodes"] [aria-label="Kebab toggle"]';
   #deleteClusterNodeBtn =
-    '[aria-label="Registered cluster nodes"] [role="menu"] button';
+    '[aria-label="Registered cluster nodes"] [role="menu"] [type="button"]';
   #nodeHostInput = "node";
   #addNodeConfirmBtn = "#add-node-confirm";
 
-  #accessTokenSignatureAlgorithmInput = "#accessTokenSignatureAlgorithm";
+  #accessTokenSignatureAlgorithmInput = "#access🍺token🍺signed🍺response🍺alg";
   #fineGrainSaveBtn = "#fineGrainSave";
   #fineGrainRevertBtn = "#fineGrainRevert";
   #OIDCCompatabilitySaveBtn = "OIDCCompatabilitySave";
@@ -36,8 +36,8 @@ export default class AdvancedTab extends PageObject {
   #pushedAuthorizationRequestRequiredSwitch =
     "attributes.require🍺pushed🍺authorization🍺requests";
 
-  #browserFlowInput = "#browserFlow";
-  #directGrantInput = "#directGrant";
+  #browserFlowInput = "#browser";
+  #directGrantInput = "#direct_grant";
 
   #jumpToOIDCCompatabilitySettings =
     "jump-link-openid-connect-compatibility-modes";
@@ -85,9 +85,7 @@ export default class AdvancedTab extends PageObject {
 
   selectAccessTokenSignatureAlgorithm(algorithm: string) {
     cy.get(this.#accessTokenSignatureAlgorithmInput).click();
-    cy.get(this.#accessTokenSignatureAlgorithmInput + " + ul")
-      .contains(algorithm)
-      .click();
+    cy.get(".pf-v5-c-menu__list").contains(algorithm).click();
 
     return this;
   }
@@ -200,7 +198,9 @@ export default class AdvancedTab extends PageObject {
 
   selectKeyForCodeExchangeInput(input: string) {
     cy.get(this.#keyForCodeExchangeInput).click();
-    cy.get(this.#keyForCodeExchangeInput + " + ul")
+    cy.get(this.#keyForCodeExchangeInput)
+      .parent()
+      .get("ul")
       .contains(input)
       .click();
     return this;
@@ -228,17 +228,13 @@ export default class AdvancedTab extends PageObject {
 
   selectBrowserFlowInput(input: string) {
     cy.get(this.#browserFlowInput).click();
-    cy.get(this.#browserFlowInput + " + ul")
-      .contains(input)
-      .click();
+    cy.get(this.#browserFlowInput).parent().get("ul").contains(input).click();
     return this;
   }
 
   selectDirectGrantInput(input: string) {
     cy.get(this.#directGrantInput).click();
-    cy.get(this.#directGrantInput + " + ul")
-      .contains(input)
-      .click();
+    cy.get(this.#directGrantInput).parent().get("ul").contains(input).click();
     return this;
   }
 

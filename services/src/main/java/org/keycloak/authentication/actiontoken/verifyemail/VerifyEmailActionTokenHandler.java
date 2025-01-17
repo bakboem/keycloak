@@ -1,13 +1,13 @@
 /*
  * Copyright 2017 Red Hat, Inc. and/or its affiliates
  * and other contributors as indicated by the @author tags.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,6 +16,7 @@
  */
 package org.keycloak.authentication.actiontoken.verifyemail;
 
+import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.authentication.actiontoken.AbstractActionTokenHandler;
 import org.keycloak.TokenVerifier.Predicate;
 import org.keycloak.authentication.actiontoken.*;
@@ -81,6 +82,7 @@ public class VerifyEmailActionTokenHandler extends AbstractActionTokenHandler<Ve
             return session.getProvider(LoginFormsProvider.class)
                     .setAuthenticationSession(authSession)
                     .setInfo(Messages.EMAIL_VERIFIED_ALREADY, user.getEmail())
+                    .setUser(user)
                     .createInfoPage();
         }
 
@@ -94,13 +96,14 @@ public class VerifyEmailActionTokenHandler extends AbstractActionTokenHandler<Ve
             String authSessionEncodedId = AuthenticationSessionCompoundId.fromAuthSession(authSession).getEncodedId();
             token.setCompoundAuthenticationSessionId(authSessionEncodedId);
             UriBuilder builder = Urls.actionTokenBuilder(uriInfo.getBaseUri(), token.serialize(session, realm, uriInfo),
-                    authSession.getClient().getClientId(), authSession.getTabId());
+                    authSession.getClient().getClientId(), authSession.getTabId(), AuthenticationProcessor.getClientData(session, authSession));
             String confirmUri = builder.build(realm.getName()).toString();
 
             return session.getProvider(LoginFormsProvider.class)
                     .setAuthenticationSession(authSession)
                     .setSuccess(Messages.CONFIRM_EMAIL_ADDRESS_VERIFICATION, user.getEmail())
                     .setAttribute(Constants.TEMPLATE_ATTR_ACTION_URI, confirmUri)
+                    .setUser(user)
                     .createInfoPage();
         }
 
@@ -125,6 +128,7 @@ public class VerifyEmailActionTokenHandler extends AbstractActionTokenHandler<Ve
             return session.getProvider(LoginFormsProvider.class)
                     .setAuthenticationSession(authSession)
                     .setSuccess(Messages.EMAIL_VERIFIED)
+                    .setUser(user)
                     .createInfoPage();
         }
 

@@ -87,6 +87,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.REALM_CONS_NAME;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.REALM_PROV_NAME;
@@ -550,7 +551,7 @@ public final class KcOidcBrokerTransientSessionsTest extends AbstractAdvancedBro
         OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, CONSUMER_BROKER_APP_SECRET);
 
         // Check that userInfo can be invoked
-        var userInfoResponse = oauth.doUserInfoRequestByGet(tokenResponse.getAccessToken());
+        var userInfoResponse = oauth.doUserInfoRequestByGet(tokenResponse);
         assertThat(userInfoResponse.getUserInfo().getSub(), is(lwUserId));
         assertThat(userInfoResponse.getUserInfo().getPreferredUsername(), is(bc.getUserLogin()));
         assertThat(userInfoResponse.getUserInfo().getEmail(), is(bc.getUserEmail()));
@@ -614,7 +615,7 @@ public final class KcOidcBrokerTransientSessionsTest extends AbstractAdvancedBro
                     .assertEvent();
 
             assertEquals(TokenUtil.TOKEN_TYPE_OFFLINE, offlineToken.getType());
-            assertEquals(0, offlineToken.getExpiration());
+            assertNull(offlineToken.getExp());
 
             assertTrue(tokenResponse.getScope().contains(OAuth2Constants.OFFLINE_ACCESS));
 
@@ -631,8 +632,8 @@ public final class KcOidcBrokerTransientSessionsTest extends AbstractAdvancedBro
             events.expectRefresh(offlineToken.getId(), newRefreshToken.getSessionState())
                     .realm(consumerRealmRep)
                     .client(CONSUMER_BROKER_APP_CLIENT_ID)
+                    .user((String) null)
                     .error(Errors.INVALID_TOKEN)
-                    .user(lwUserId)
                     .clearDetails()
                     .assertEvent();
         } finally {
@@ -712,7 +713,7 @@ public final class KcOidcBrokerTransientSessionsTest extends AbstractAdvancedBro
             userAttrMapper.setName(USER_ATTRIBUTE_NAME);
             userAttrMapper.setProtocol(OIDCLoginProtocol.LOGIN_PROTOCOL);
             userAttrMapper.setProtocolMapper(UserAttributeMapper.PROVIDER_ID);
-    
+
             Map<String, String> userAttrMapperConfig = userAttrMapper.getConfig();
             userAttrMapperConfig.put(ProtocolMapperUtils.USER_ATTRIBUTE, USER_ATTRIBUTE_NAME);
             userAttrMapperConfig.put(OIDCAttributeMapperHelper.TOKEN_CLAIM_NAME, USER_ATTRIBUTE_NAME);
@@ -727,7 +728,7 @@ public final class KcOidcBrokerTransientSessionsTest extends AbstractAdvancedBro
             client.setProtocolMappers(mappers);
 
             return clients;
-        }    
+        }
 
         @Override
         public List<ClientRepresentation> createConsumerClients() {

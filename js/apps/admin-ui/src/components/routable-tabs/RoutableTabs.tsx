@@ -22,7 +22,9 @@ import {
 } from "react-router-dom";
 import { useServerInfo } from "../../context/server-info/ServerInfoProvider";
 import { PageHandler } from "../../page/PageHandler";
-import { TAB_PROVIDER } from "../../page/PageList";
+import { TAB_PROVIDER } from "../../page/constants";
+import useIsFeatureEnabled, { Feature } from "../../utils/useIsFeatureEnabled";
+import { useTranslation } from "react-i18next";
 
 // TODO: Remove the custom 'children' props and type once the following issue has been resolved:
 // https://github.com/patternfly/patternfly-react/issues/6766
@@ -47,6 +49,8 @@ export const RoutableTabs = ({
   const params = useParams();
   const { componentTypes } = useServerInfo();
   const tabs = componentTypes?.[TAB_PROVIDER] || [];
+  const isFeatureEnabled = useIsFeatureEnabled();
+  const { t } = useTranslation();
 
   const matchedTabs = tabs
     .filter((tab) => matchPath({ path: tab.metadata.path }, pathname))
@@ -91,12 +95,13 @@ export const RoutableTabs = ({
       }}
       {...otherProps}
     >
-      {children}
-      {matchedTabs.map((t) => (
-        <DynamicTab key={t.id} eventKey={t.pathname} title={t.id}>
-          <PageHandler page={t} providerType={TAB_PROVIDER} />
-        </DynamicTab>
-      ))}
+      {children as any}
+      {isFeatureEnabled(Feature.DeclarativeUI) &&
+        matchedTabs.map<any>((tab) => (
+          <DynamicTab key={tab.id} eventKey={tab.pathname} title={t(tab.id)}>
+            <PageHandler page={tab} providerType={TAB_PROVIDER} />
+          </DynamicTab>
+        ))}
     </Tabs>
   );
 };

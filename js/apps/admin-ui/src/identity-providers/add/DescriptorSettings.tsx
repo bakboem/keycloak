@@ -3,7 +3,12 @@ import { ExpandableSection } from "@patternfly/react-core";
 import { useState } from "react";
 import { FormProvider, useFormContext, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { NumberControl, SelectControl, TextControl } from "ui-shared";
+import {
+  NumberControl,
+  SelectControl,
+  TextAreaControl,
+  TextControl,
+} from "@keycloak/keycloak-ui-shared";
 import { DefaultSwitchControl } from "../../components/SwitchControl";
 
 import "./discovery-settings.css";
@@ -44,7 +49,7 @@ const Fields = ({ readOnly }: DescriptorSettingsProps) => {
   });
 
   return (
-    <div className="pf-c-form pf-m-horizontal">
+    <div className="pf-v5-c-form pf-m-horizontal">
       <FormProvider {...form}>
         <TextControl
           name="config.entityId"
@@ -67,12 +72,18 @@ const Fields = ({ readOnly }: DescriptorSettingsProps) => {
           rules={{ required: t("required") }}
         />
         <TextControl
+          name="config.artifactResolutionServiceUrl"
+          label={t("artifactResolutionServiceUrl")}
+          labelIcon={t("artifactResolutionServiceUrlHelp")}
+          type="url"
+          isDisabled={readOnly}
+        />
+        <TextControl
           name="config.singleLogoutServiceUrl"
           label={t("singleLogoutServiceUrl")}
           labelIcon={t("singleLogoutServiceUrlHelp")}
           type="url"
           readOnly={readOnly}
-          rules={{ required: t("required") }}
         />
         <DefaultSwitchControl
           name="config.backchannelSupported"
@@ -166,6 +177,13 @@ const Fields = ({ readOnly }: DescriptorSettingsProps) => {
         <DefaultSwitchControl
           name="config.postBindingResponse"
           label={t("httpPostBindingResponse")}
+          isDisabled={readOnly}
+          stringify
+        />
+
+        <DefaultSwitchControl
+          name="config.artifactBindingResponse"
+          label={t("artifactBindingResponse")}
           isDisabled={readOnly}
           stringify
         />
@@ -278,11 +296,13 @@ const Fields = ({ readOnly }: DescriptorSettingsProps) => {
               name="config.useMetadataDescriptorUrl"
               label={t("useMetadataDescriptorUrl")}
               isDisabled={readOnly}
+              stringify
             />
             {useMetadataDescriptorUrl !== "true" && (
-              <TextControl
+              <TextAreaControl
                 name="config.signingCertificate"
-                label="validatingX509Certs"
+                label={t("validatingX509Certs")}
+                labelIcon={t("validatingX509CertsHelp")}
                 readOnly={readOnly}
               />
             )}
@@ -333,7 +353,7 @@ export const DescriptorSettings = ({ readOnly }: DescriptorSettingsProps) => {
     <ExpandableSection
       className="keycloak__discovery-settings__metadata"
       toggleText={isExpanded ? t("hideMetaData") : t("showMetaData")}
-      onToggle={(isOpen) => setIsExpanded(isOpen)}
+      onToggle={(_event, isOpen) => setIsExpanded(isOpen)}
       isExpanded={isExpanded}
     >
       <Fields readOnly={readOnly} />

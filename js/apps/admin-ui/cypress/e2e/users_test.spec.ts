@@ -1,5 +1,3 @@
-import { v4 as uuid } from "uuid";
-
 import SidebarPage from "../support/pages/admin-ui/SidebarPage";
 import LoginPage from "../support/pages/LoginPage";
 import RealmSettingsPage from "../support/pages/admin-ui/manage/realm_settings/RealmSettingsPage";
@@ -43,7 +41,7 @@ describe("User creation", () => {
 
   before(async () => {
     for (let i = 0; i <= 2; i++) {
-      groupName += "_" + uuid();
+      groupName += "_" + crypto.randomUUID();
       await adminClient.createGroup(groupName);
       groupsList = [...groupsList, groupName];
     }
@@ -67,7 +65,7 @@ describe("User creation", () => {
   });
 
   it("Create user test", () => {
-    itemId += "_" + uuid();
+    itemId += "_" + crypto.randomUUID();
     // Create
     createUserPage.goToCreateUser();
 
@@ -78,8 +76,24 @@ describe("User creation", () => {
     masthead.checkNotificationMessage("The user has been created");
   });
 
+  it("Should check temporary admin user existence", () => {
+    const commonPage = new CommonPage();
+
+    // check banner visibility first
+    cy.get(".pf-v5-c-banner").should(
+      "contain.text",
+      "You are logged in as a temporary admin user.",
+    );
+
+    commonPage.tableToolbarUtils().searchItem("admin", false);
+    commonPage.tableUtils().checkRowItemExists("admin");
+    commonPage
+      .tableUtils()
+      .checkTemporaryAdminLabelExists("temporary-admin-label");
+  });
+
   it("Create user with groups test", () => {
-    itemIdWithGroups += uuid();
+    itemIdWithGroups += crypto.randomUUID();
     // Add user from search bar
     createUserPage.goToCreateUser();
 
@@ -101,7 +115,7 @@ describe("User creation", () => {
   });
 
   it("Create user with credentials test", () => {
-    itemIdWithCred += "_" + uuid();
+    itemIdWithCred += "_" + crypto.randomUUID();
 
     // Add user from search bar
     createUserPage.goToCreateUser();
@@ -127,7 +141,7 @@ describe("User creation", () => {
 
   it("Search non-existing user test", () => {
     listingPage.searchItem("user_DNE");
-    cy.findByTestId(listingPage.emptyState).should("exist");
+    listingPage.assertNoResults();
   });
 
   it("User details test", () => {
@@ -171,7 +185,7 @@ describe("User creation", () => {
 
     masthead.checkNotificationMessage("The user has not been saved: ");
 
-    cy.get(".pf-c-helper-text__item-text")
+    cy.get(".pf-v5-c-helper-text__item-text")
       .filter(':contains("Update of read-only attribute rejected")')
       .should("have.length", 2);
 
@@ -203,7 +217,7 @@ describe("User creation", () => {
 
     cy.wait("@save-user").should(({ request, response }) => {
       expect(response?.statusCode).to.equal(204);
-      expect(request.body.attributes, "response body").deep.equal({
+      expect(request.body.attributes, "response body").deep.contains({
         "key-multiple": ["other value"],
       });
     });
@@ -435,7 +449,12 @@ describe("User creation", () => {
     credentialsPage.goToCredentialsTab();
 
     cy.wait(2000);
-    listingPage.deleteItem(itemCredential);
+    cy.get("table")
+      .contains(itemCredential)
+      .parentsUntil("tbody")
+      .find(".pf-v5-c-table__action .pf-v5-c-menu-toggle")
+      .click();
+    cy.get("table").contains("Delete").click();
     modalUtils.checkModalTitle("Delete credentials?").confirmModal();
 
     masthead.checkNotificationMessage(
@@ -450,7 +469,7 @@ describe("User creation", () => {
     listingPage.searchItem(itemId).itemExist(itemId);
     listingPage.deleteItemFromSearchBar(itemId);
 
-    modalUtils.checkModalTitle("Delete user?").confirmModal();
+    modalUtils.checkModalTitle("Delete user " + itemId + "?").confirmModal();
 
     masthead.checkNotificationMessage("The user has been deleted");
     sidebarPage.waitForPageLoad();
@@ -462,7 +481,9 @@ describe("User creation", () => {
     // Delete
     listingPage.deleteItem(itemIdWithGroups);
 
-    modalUtils.checkModalTitle("Delete user?").confirmModal();
+    modalUtils
+      .checkModalTitle("Delete user " + itemIdWithGroups + "?")
+      .confirmModal();
 
     masthead.checkNotificationMessage("The user has been deleted");
     sidebarPage.waitForPageLoad();
@@ -474,7 +495,9 @@ describe("User creation", () => {
     // Delete
     listingPage.deleteItem(itemIdWithCred);
 
-    modalUtils.checkModalTitle("Delete user?").confirmModal();
+    modalUtils
+      .checkModalTitle("Delete user " + itemIdWithCred + "?")
+      .confirmModal();
 
     masthead.checkNotificationMessage("The user has been deleted");
     sidebarPage.waitForPageLoad();
@@ -485,6 +508,7 @@ describe("User creation", () => {
   describe("Accessibility tests for users", () => {
     const a11yUser = "a11y-user";
     const role = "admin";
+    const roleType = "roles";
     const roleMappingTab = new RoleMappingTab("");
 
     beforeEach(() => {
@@ -508,12 +532,6 @@ describe("User creation", () => {
       createUserPage.createUser(a11yUser);
       userDetailsPage.fillUserData();
       createUserPage.create();
-      cy.checkA11y();
-    });
-
-    it("Check a11y violations on user attributes tab", () => {
-      usersPage.goToUserListTab().goToUserDetailsPage(a11yUser);
-      attributesTab.goToAttributesTab();
       cy.checkA11y();
     });
 
@@ -547,7 +565,7 @@ describe("User creation", () => {
       roleMappingTab.goToRoleMappingTab();
       cy.findByTestId("assignRole").click();
       cy.checkA11y();
-      roleMappingTab.selectRow(role).assign();
+      roleMappingTab.changeRoleTypeFilter(roleType).selectRow(role).assign();
     });
 
     it("Check a11y violations on user groups tab", () => {
@@ -603,11 +621,6 @@ describe("User creation", () => {
         .clickDropdownItem("Delete");
       cy.checkA11y();
       cy.findByTestId("confirm").click();
-    });
-
-    it("Check a11y violations on permissions tab", () => {
-      usersPage.goToPermissionsTab();
-      cy.checkA11y();
     });
   });
 });

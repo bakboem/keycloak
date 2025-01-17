@@ -1,9 +1,11 @@
+import { HelpItem, generateId } from "@keycloak/keycloak-ui-shared";
 import {
   ActionList,
   ActionListItem,
   Button,
   EmptyState,
   EmptyStateBody,
+  EmptyStateFooter,
   Flex,
   FlexItem,
   FormGroup,
@@ -13,12 +15,10 @@ import { MinusCircleIcon, PlusCircleIcon } from "@patternfly/react-icons";
 import { useEffect, useState } from "react";
 import { useFormContext } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { generateId } from "../../util";
 
-import { HelpItem } from "ui-shared";
 import { KeyValueType } from "../key-value-form/key-value-convert";
-import type { ComponentProps } from "./components";
 import { convertToName } from "./DynamicComponents";
+import type { ComponentProps } from "./components";
 
 type IdKeyValueType = KeyValueType & {
   id: number;
@@ -101,7 +101,7 @@ export const MapComponent = ({
                 aria-label={t("key")}
                 defaultValue={attribute.key}
                 data-testid={`${fieldName}.${index}.key`}
-                onChange={(value) => updateKey(index, value)}
+                onChange={(_event, value) => updateKey(index, value)}
                 onBlur={() => update()}
               />
             </FlexItem>
@@ -115,7 +115,7 @@ export const MapComponent = ({
                 aria-label={t("value")}
                 defaultValue={attribute.value}
                 data-testid={`${fieldName}.${index}.value`}
-                onChange={(value) => updateValue(index, value)}
+                onChange={(_event, value) => updateValue(index, value)}
                 onBlur={() => update()}
               />
             </FlexItem>
@@ -137,7 +137,7 @@ export const MapComponent = ({
         <ActionListItem>
           <Button
             data-testid={`${fieldName}-add-row`}
-            className="pf-u-px-0 pf-u-mt-sm"
+            className="pf-v5-u-px-0 pf-v5-u-mt-sm"
             variant="link"
             icon={<PlusCircleIcon />}
             onClick={() => appendNew()}
@@ -150,20 +150,22 @@ export const MapComponent = ({
   ) : (
     <EmptyState
       data-testid={`${name}-empty-state`}
-      className="pf-u-p-0"
+      className="pf-v5-u-p-0"
       variant="xs"
     >
       <EmptyStateBody>{t("missingAttributes", { label })}</EmptyStateBody>
-      <Button
-        data-testid={`${name}-add-row`}
-        variant="link"
-        icon={<PlusCircleIcon />}
-        isSmall
-        onClick={appendNew}
-        isDisabled={isDisabled}
-      >
-        {t("addAttribute", { label })}
-      </Button>
+      <EmptyStateFooter>
+        <Button
+          data-testid={`${name}-add-row`}
+          variant="link"
+          icon={<PlusCircleIcon />}
+          size="sm"
+          onClick={appendNew}
+          isDisabled={isDisabled}
+        >
+          {t("addAttribute", { label })}
+        </Button>
+      </EmptyStateFooter>
     </EmptyState>
   );
 };

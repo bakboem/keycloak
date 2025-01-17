@@ -31,14 +31,13 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.ModelException;
+import org.keycloak.models.ModelIllegalStateException;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.ModelToRepresentation;
-import org.keycloak.models.utils.StripSecretsUtils;
 import org.keycloak.policy.PasswordPolicyNotMetException;
 import org.keycloak.protocol.oidc.TokenManager;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.ForbiddenException;
 import org.keycloak.services.managers.RealmManager;
 import org.keycloak.services.resources.KeycloakOpenAPI;
 import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
@@ -48,6 +47,7 @@ import org.keycloak.storage.ExportImportManager;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
@@ -153,10 +153,9 @@ public class RealmsAdminResource {
             // The create event is associated with the realm of the user executing the operation,
             // instead of the realm being created.
             AdminEventBuilder adminEvent = new AdminEventBuilder(auth.getRealm(), auth, session, clientConnection);
-            adminEvent.resource(ResourceType.REALM).realm(auth.getRealm().getId()).operation(OperationType.CREATE)
+            adminEvent.resource(ResourceType.REALM).realm(auth.getRealm()).operation(OperationType.CREATE)
                     .resourcePath(realm.getName())
-                    .representation(
-                            StripSecretsUtils.strip(ModelToRepresentation.toRepresentation(session, realm, false)))
+                    .representation(ModelToRepresentation.toRepresentation(session, realm, false))
                     .success();
 
             return Response.created(location).build();
@@ -168,6 +167,9 @@ public class RealmsAdminResource {
             logger.error("Password policy not met for user " + e.getUsername(), e);
             if (session.getTransactionManager().isActive()) session.getTransactionManager().setRollbackOnly();
             throw ErrorResponse.error("Password policy not met. See logs for details", Response.Status.BAD_REQUEST);
+        } catch (ModelIllegalStateException e) {
+            logger.error(e.getMessage(), e);
+            throw ErrorResponse.error(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         } catch (ModelException e) {
             throw ErrorResponse.error(e.getMessage(), Response.Status.BAD_REQUEST);
         }
@@ -187,9 +189,7 @@ public class RealmsAdminResource {
     /**
      * Base path for the admin REST API for one particular realm.
      *
-     * @param headers
      * @param name realm name (not id!)
-     * @return
      */
     @Path("{realm}")
     public RealmAdminResource getRealmAdmin(@PathParam("realm") @Parameter(description = "realm name (not id!)") final String name) {
@@ -203,8 +203,8 @@ public class RealmsAdminResource {
         }
         AdminPermissionEvaluator realmAuth = AdminPermissions.evaluator(session, realm, auth);
 
-        AdminEventBuilder adminEvent = new AdminEventBuilder(realm, auth, session, clientConnection);
         session.getContext().setRealm(realm);
+        AdminEventBuilder adminEvent = new AdminEventBuilder(realm, auth, session, clientConnection);
 
         return new RealmAdminResource(session, realmAuth, adminEvent);
     }

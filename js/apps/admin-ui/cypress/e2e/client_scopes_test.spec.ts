@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import LoginPage from "../support/pages/LoginPage";
 import Masthead from "../support/pages/admin-ui/Masthead";
 import ListingPage, {
@@ -86,7 +85,7 @@ describe("Client Scopes test", () => {
 
     it("should filter items by Assigned type All types", () => {
       listingPage
-        .selectFilter(Filter.AssignedType)
+        .selectClientScopeFilter(Filter.AssignedType)
         .selectSecondaryFilterAssignedType(FilterAssignedType.AllTypes)
         .itemExist(FilterAssignedType.Default, true)
         .itemExist(FilterAssignedType.Optional, true)
@@ -95,7 +94,7 @@ describe("Client Scopes test", () => {
 
     it("should filter items by Assigned type Default", () => {
       listingPage
-        .selectFilter(Filter.AssignedType)
+        .selectClientScopeFilter(Filter.AssignedType)
         .selectSecondaryFilterAssignedType(FilterAssignedType.Default)
         .itemExist(FilterAssignedType.Default, true)
         .itemExist(FilterAssignedType.Optional, false)
@@ -104,7 +103,7 @@ describe("Client Scopes test", () => {
 
     it("should filter items by Assigned type Optional", () => {
       listingPage
-        .selectFilter(Filter.AssignedType)
+        .selectClientScopeFilter(Filter.AssignedType)
         .selectSecondaryFilterAssignedType(FilterAssignedType.Optional)
         .itemExist(FilterAssignedType.Default, false)
         .itemExist(FilterAssignedType.Optional, true)
@@ -113,7 +112,7 @@ describe("Client Scopes test", () => {
 
     it("should filter items by Protocol All", () => {
       listingPage
-        .selectFilter(Filter.Protocol)
+        .selectClientScopeFilter(Filter.Protocol)
         .selectSecondaryFilterProtocol(FilterProtocol.All);
       sidebarPage.waitForPageLoad();
       listingPage
@@ -124,7 +123,7 @@ describe("Client Scopes test", () => {
 
     it("should filter items by Protocol SAML", () => {
       listingPage
-        .selectFilter(Filter.Protocol)
+        .selectClientScopeFilter(Filter.Protocol)
         .selectSecondaryFilterProtocol(FilterProtocol.SAML)
         .itemExist(FilterProtocol.SAML, true)
         .itemExist(openIDConnectItemText, false); //using FilterProtocol.OpenID will fail, text does not match.
@@ -132,7 +131,7 @@ describe("Client Scopes test", () => {
 
     it("should filter items by Protocol OpenID", () => {
       listingPage
-        .selectFilter(Filter.Protocol)
+        .selectClientScopeFilter(Filter.Protocol)
         .selectSecondaryFilterProtocol(FilterProtocol.OpenID)
         .itemExist(FilterProtocol.SAML, false)
         .itemExist(openIDConnectItemText, true); //using FilterProtocol.OpenID will fail, text does not match.
@@ -302,7 +301,7 @@ describe("Client Scopes test", () => {
     });
 
     it("Client scope CRUD test", () => {
-      itemId += "_" + uuid();
+      itemId += "_" + crypto.randomUUID();
 
       // Create
       listingPage.itemExist(itemId, false).goToCreateItem();
@@ -342,8 +341,14 @@ describe("Client Scopes test", () => {
 
     it("Assign and unassign role", () => {
       const role = "admin";
+      const roleType = "roles";
       listingPage.searchItem(scopeName, false).goToItemDetails(scopeName);
-      scopeTab.goToScopeTab().assignRole().selectRow(role).assign();
+      scopeTab
+        .goToScopeTab()
+        .assignRole()
+        .changeRoleTypeFilter(roleType)
+        .selectRow(role)
+        .assign();
       masthead.checkNotificationMessage("Role mapping updated");
       scopeTab.checkRoles([role]);
       scopeTab.hideInheritedRoles().selectRow(role).unAssign();
@@ -424,7 +429,7 @@ describe("Client Scopes test", () => {
       cy.injectAxe();
     });
 
-    const scopeName = "a11y";
+    const scopeName = "a11y_" + crypto.randomUUID();
 
     after(async () => {
       await adminClient.deleteClientScope(scopeName);
@@ -446,6 +451,7 @@ describe("Client Scopes test", () => {
       const predefinedMapper = "Allowed Web Origins";
       const scopeTab = new RoleMappingTab("client-scope");
       const role = "admin";
+      const roleType = "roles";
 
       listingPage.goToCreateItem();
       createClientScopePage.fillClientScopeData(scopeName).save();
@@ -475,7 +481,12 @@ describe("Client Scopes test", () => {
       cy.checkA11y();
       cy.findByTestId("cancel").click();
 
-      scopeTab.goToScopeTab().assignRole().selectRow(role).assign();
+      scopeTab
+        .goToScopeTab()
+        .assignRole()
+        .changeRoleTypeFilter(roleType)
+        .selectRow(role)
+        .assign();
       cy.checkA11y();
     });
   });

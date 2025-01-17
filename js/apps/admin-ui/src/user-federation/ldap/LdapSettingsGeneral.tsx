@@ -1,21 +1,17 @@
 import ComponentRepresentation from "@keycloak/keycloak-admin-client/lib/defs/componentRepresentation";
 import {
-  FormGroup,
-  Select,
-  SelectOption,
+  HelpItem,
+  KeycloakSelect,
   SelectVariant,
-} from "@patternfly/react-core";
-import { useState } from "react";
+  TextControl,
+} from "@keycloak/keycloak-ui-shared";
+import { FormGroup, SelectOption } from "@patternfly/react-core";
+import { useEffect, useState } from "react";
 import { Controller, FormProvider, UseFormReturn } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { HelpItem, TextControl } from "ui-shared";
-
-import { adminClient } from "../../admin-client";
 import { FormAccess } from "../../components/form/FormAccess";
-import { KeycloakTextInput } from "../../components/keycloak-text-input/KeycloakTextInput";
 import { WizardSectionHeader } from "../../components/wizard-section-header/WizardSectionHeader";
 import { useRealm } from "../../context/realm-context/RealmContext";
-import { useFetch } from "../../utils/useFetch";
 
 export type LdapSettingsGeneralProps = {
   form: UseFormReturn<ComponentRepresentation>;
@@ -31,13 +27,9 @@ export const LdapSettingsGeneral = ({
   vendorEdit = false,
 }: LdapSettingsGeneralProps) => {
   const { t } = useTranslation();
-  const { realm } = useRealm();
+  const { realm, realmRepresentation } = useRealm();
 
-  useFetch(
-    () => adminClient.realms.findOne({ realm }),
-    (result) => form.setValue("parentId", result!.id),
-    [],
-  );
+  useEffect(() => form.setValue("parentId", realmRepresentation?.id), []);
   const [isVendorDropdownOpen, setIsVendorDropdownOpen] = useState(false);
 
   const setVendorDefaultValues = () => {
@@ -108,18 +100,18 @@ export const LdapSettingsGeneral = ({
       )}
       <FormAccess role="manage-realm" isHorizontal>
         {/* These hidden fields are required so data object written back matches data retrieved */}
-        <KeycloakTextInput
-          hidden
+        <input
+          type="hidden"
           defaultValue="ldap"
           {...form.register("providerId")}
         />
-        <KeycloakTextInput
-          hidden
+        <input
+          type="hidden"
           defaultValue="org.keycloak.storage.UserStorageProvider"
           {...form.register("providerType")}
         />
-        <KeycloakTextInput
-          hidden
+        <input
+          type="hidden"
           defaultValue={realm}
           {...form.register("parentId")}
         />
@@ -145,13 +137,12 @@ export const LdapSettingsGeneral = ({
             defaultValue="ad"
             control={form.control}
             render={({ field }) => (
-              <Select
+              <KeycloakSelect
                 isDisabled={!!vendorEdit}
                 toggleId="kc-vendor"
-                required
                 onToggle={() => setIsVendorDropdownOpen(!isVendorDropdownOpen)}
                 isOpen={isVendorDropdownOpen}
-                onSelect={(_, value) => {
+                onSelect={(value) => {
                   field.onChange(value as string);
                   setIsVendorDropdownOpen(false);
                   setVendorDefaultValues();
@@ -160,7 +151,7 @@ export const LdapSettingsGeneral = ({
                 variant={SelectVariant.single}
                 aria-label={t("selectVendor")}
               >
-                <SelectOption key={0} value="ad" isPlaceholder>
+                <SelectOption key={0} value="ad">
                   Active Directory
                 </SelectOption>
                 <SelectOption key={1} value="rhds">
@@ -175,7 +166,7 @@ export const LdapSettingsGeneral = ({
                 <SelectOption key={4} value="other">
                   Other
                 </SelectOption>
-              </Select>
+              </KeycloakSelect>
             )}
           ></Controller>
         </FormGroup>

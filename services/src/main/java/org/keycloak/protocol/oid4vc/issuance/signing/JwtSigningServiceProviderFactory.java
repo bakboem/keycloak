@@ -21,14 +21,11 @@ import org.keycloak.component.ComponentModel;
 import org.keycloak.component.ComponentValidationException;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
-import org.keycloak.protocol.oid4vc.issuance.OffsetTimeProvider;
-import org.keycloak.protocol.oid4vc.issuance.VCIssuerException;
 import org.keycloak.protocol.oid4vc.model.Format;
 import org.keycloak.provider.ConfigurationValidationHelper;
 import org.keycloak.provider.ProviderConfigProperty;
 
 import java.util.List;
-import java.util.Optional;
 
 
 /**
@@ -38,7 +35,7 @@ import java.util.Optional;
  */
 public class JwtSigningServiceProviderFactory implements VCSigningServiceProviderFactory {
 
-    public static final Format SUPPORTED_FORMAT = Format.JWT_VC;
+    public static final String SUPPORTED_FORMAT = Format.JWT_VC;
     private static final String HELP_TEXT = "Issues JWT-VCs following the specification of https://identity.foundation/jwt-vc-presentation-profile/.";
 
     @Override
@@ -46,15 +43,8 @@ public class JwtSigningServiceProviderFactory implements VCSigningServiceProvide
 
         String keyId = model.get(SigningProperties.KEY_ID.getKey());
         String algorithmType = model.get(SigningProperties.ALGORITHM_TYPE.getKey());
-        String tokenType = model.get(SigningProperties.TOKEN_TYPE.getKey());
-        String issuerDid = Optional.ofNullable(
-                        session
-                                .getContext()
-                                .getRealm()
-                                .getAttribute(ISSUER_DID_REALM_ATTRIBUTE_KEY))
-                .orElseThrow(() -> new VCIssuerException("No issuerDid configured."));
 
-        return new JwtSigningService(session, keyId, algorithmType, tokenType, issuerDid, new OffsetTimeProvider());
+        return new JwtSigningService(session, keyId, algorithmType);
     }
 
     @Override
@@ -66,24 +56,22 @@ public class JwtSigningServiceProviderFactory implements VCSigningServiceProvide
     public List<ProviderConfigProperty> getConfigProperties() {
         return VCSigningServiceProviderFactory.configurationBuilder()
                 .property(SigningProperties.ALGORITHM_TYPE.asConfigProperty())
-                .property(SigningProperties.TOKEN_TYPE.asConfigProperty())
                 .build();
     }
 
     @Override
     public String getId() {
-        return SUPPORTED_FORMAT.toString();
+        return SUPPORTED_FORMAT;
     }
 
     @Override
     public void validateSpecificConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model) throws ComponentValidationException {
         ConfigurationValidationHelper.check(model)
-                .checkRequired(SigningProperties.TOKEN_TYPE.asConfigProperty())
                 .checkRequired(SigningProperties.ALGORITHM_TYPE.asConfigProperty());
     }
 
     @Override
-    public Format supportedFormat() {
+    public String supportedFormat() {
         return SUPPORTED_FORMAT;
     }
 }

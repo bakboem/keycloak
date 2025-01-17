@@ -27,6 +27,7 @@ import org.keycloak.OAuthErrorException;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.authenticators.client.JWTClientAuthenticator;
+import org.keycloak.authentication.authenticators.client.JWTClientSecretAuthenticator;
 import org.keycloak.common.constants.ServiceAccountConstants;
 import org.keycloak.common.util.KeystoreUtil.KeystoreFormat;
 import org.keycloak.crypto.Algorithm;
@@ -115,7 +116,7 @@ public class ClientAuthSignedJWTTest extends AbstractClientAuthSignedJWTTest {
 
         events.expectRefresh(refreshToken.getId(), refreshToken.getSessionState())
                 .client("client1")
-                .user(client1SAUserId)
+                .user((String) null)
                 .removeDetail(Details.TOKEN_ID)
                 .removeDetail(Details.UPDATED_REFRESH_TOKEN_ID)
                 .detail(Details.CLIENT_AUTH_METHOD, JWTClientAuthenticator.PROVIDER_ID)
@@ -574,6 +575,10 @@ public class ClientAuthSignedJWTTest extends AbstractClientAuthSignedJWTTest {
     }
 
     @Test
+    public void testTokenIntrospectionEndpointAsAudience() throws Exception {
+        testEndpointAsAudience(oauth.getTokenIntrospectionUrl());
+    }
+    @Test
     public void testInvalidAudience() throws Exception {
         ClientRepresentation clientRepresentation = app2;
         ClientResource clientResource = getClient(testRealm.getRealm(), clientRepresentation.getId());
@@ -649,8 +654,8 @@ public class ClientAuthSignedJWTTest extends AbstractClientAuthSignedJWTTest {
         setTimeOffset(0);
 
         assertError(response, "client1", OAuthErrorException.INVALID_CLIENT, Errors.INVALID_CLIENT_CREDENTIALS);
-        
-        
+
+
     }
 
     @Test
@@ -669,6 +674,28 @@ public class ClientAuthSignedJWTTest extends AbstractClientAuthSignedJWTTest {
 
         assertEquals(400, response.getStatusCode());
         assertEquals(OAuthErrorException.INVALID_CLIENT, response.getError());
+    }
+
+    @Test
+    public void testAuthenticationFailsWhenClientSecretJWTAuthenticatorSet() throws Exception {
+        // Set client authenticator to JWT signed by client secret.
+        ClientResource clientResource = ApiUtil.findClientByClientId(adminClient.realm("test"), "client1");
+        ClientRepresentation clientRep = clientResource.toRepresentation();
+        clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID);
+        clientResource.update(clientRep);
+
+        // It should not be possible to use private_key_jwt for the authentication
+        try {
+            String clientJwt = getClient1SignedJWT();
+
+            OAuthClient.AccessTokenResponse response = doClientCredentialsGrantRequest(clientJwt);
+
+            assertEquals(400, response.getStatusCode());
+            assertEquals(OAuthErrorException.UNAUTHORIZED_CLIENT, response.getError());
+        } finally {
+            clientRep.setClientAuthenticatorType(JWTClientAuthenticator.PROVIDER_ID);
+            clientResource.update(clientRep);
+        }
     }
 
     @Test
@@ -709,7 +736,7 @@ public class ClientAuthSignedJWTTest extends AbstractClientAuthSignedJWTTest {
         assertSuccess(response, app1.getClientId(), serviceAccountUser.getId(), serviceAccountUser.getUsername());
 
         // Test expired lifespan
-        response = testMissingClaim(-11, "expiration");
+        response = testMissingClaim(- 11 - 15, "expiration"); // 15 sec clock skew
         assertError(response, app1.getClientId(), OAuthErrorException.INVALID_CLIENT, Errors.INVALID_CLIENT_CREDENTIALS);
 
         // Missing exp and issuedAt should return error
@@ -754,5 +781,17 @@ public class ClientAuthSignedJWTTest extends AbstractClientAuthSignedJWTTest {
     @Test
     public void testDirectGrantRequestFailureES256() throws Exception {
         testDirectGrantRequestFailure(Algorithm.ES256);
+    }
+
+    @Test
+    public void testClockSkew() throws Exception {
+        OAuthClient.AccessTokenResponse response = testMissingClaim(15, "issuedAt", "notBefore"); // allowable clock skew is 15 sec
+        assertSuccess(response, app1.getClientId(), serviceAccountUser.getId(), serviceAccountUser.getUsername());
+
+        // excess allowable clock skew
+        response = testMissingClaim(15 + 15, "issuedAt");
+        assertError(response, app1.getClientId(), OAuthErrorException.INVALID_CLIENT, Errors.INVALID_CLIENT_CREDENTIALS);
+        response = testMissingClaim(15 + 15, "notBefore");
+        assertError(response, app1.getClientId(), OAuthErrorException.INVALID_CLIENT, Errors.INVALID_CLIENT_CREDENTIALS);
     }
 }

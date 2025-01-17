@@ -1,4 +1,8 @@
-import type RealmRepresentation from "@keycloak/keycloak-admin-client/lib/defs/realmRepresentation";
+import {
+  ListEmptyState,
+  PaginatingTableToolbar,
+  useFetch,
+} from "@keycloak/keycloak-ui-shared";
 import {
   Button,
   Flex,
@@ -10,116 +14,88 @@ import {
   ModalVariant,
   Text,
   TextContent,
+  TextInput,
   TextVariants,
 } from "@patternfly/react-core";
-import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import { SearchIcon } from "@patternfly/react-icons";
-import { useEffect, useMemo, useState } from "react";
+import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
+import { useState } from "react";
+import { useFormContext } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { FormProvider, useForm } from "react-hook-form";
+import { useAdminClient } from "../../../admin-client";
 import { useRealm } from "../../../context/realm-context/RealmContext";
 import { useWhoAmI } from "../../../context/whoami/WhoAmI";
-import { adminClient } from "../../../admin-client";
-import { PaginatingTableToolbar } from "../../../components/table-toolbar/PaginatingTableToolbar";
-import { ListEmptyState } from "../../../components/list-empty-state/ListEmptyState";
-import { useFetch } from "../../../utils/useFetch";
-import { localeToDisplayName } from "../../../util";
-import { DEFAULT_LOCALE } from "../../../i18n/i18n";
-import { TextControl } from "ui-shared";
+import { beerify, localeToDisplayName } from "../../../util";
+import useLocale from "../../../utils/useLocale";
+import { Translation, TranslationForm } from "./TranslatableField";
 
-type TranslationForm = {
-  locale: string;
-  value: string;
-};
-
-type Translations = {
-  key: string;
-  translations: TranslationForm[];
-};
-
-export type AddTranslationsDialogProps = {
+type AddTranslationsDialogProps = {
   translationKey: string;
-  onCancel: () => void;
+  fieldName: string;
   toggleDialog: () => void;
-  onTranslationsAdded: (translations: Translations) => void;
 };
 
 export const AddTranslationsDialog = ({
   translationKey,
-  onCancel,
+  fieldName,
   toggleDialog,
-  onTranslationsAdded,
 }: AddTranslationsDialogProps) => {
+  const { adminClient } = useAdminClient();
   const { t } = useTranslation();
-  const { realm: realmName } = useRealm();
-  const [realm, setRealm] = useState<RealmRepresentation>();
+  const { realm: realmName, realmRepresentation: realm } = useRealm();
+  const combinedLocales = useLocale();
   const { whoAmI } = useWhoAmI();
   const [max, setMax] = useState(10);
   const [first, setFirst] = useState(0);
   const [filter, setFilter] = useState("");
-
-  const form = useForm<{
-    key: string;
-    translations: TranslationForm[];
-  }>({
-    mode: "onChange",
-  });
+  const [translations, setTranslations] = useState<TranslationForm[]>([]);
+  const prefix = `translation.${beerify(translationKey)}`;
 
   const {
-    getValues,
-    handleSubmit,
+    register,
     setValue,
+    getValues,
     formState: { isValid },
-  } = form;
+  } = useFormContext();
+
+  const setupForm = (translation: Translation) => {
+    translation[translationKey].forEach((translation, rowIndex) => {
+      const valueKey = `${prefix}.${rowIndex}.value`;
+      setValue(`${prefix}.${rowIndex}.locale`, translation.locale || "");
+      setValue(valueKey, getValues(valueKey) || translation.value);
+    });
+  };
 
   useFetch(
-    () => adminClient.realms.findOne({ realm: realmName }),
-    (realm) => {
-      if (!realm) {
-        throw new Error(t("notFound"));
-      }
-      setRealm(realm);
+    async () => {
+      const selectedLocales = combinedLocales
+        .filter((l) =>
+          localeToDisplayName(l, whoAmI.getLocale())
+            ?.toLocaleLowerCase(realm?.defaultLocale)
+            ?.includes(filter.toLocaleLowerCase(realm?.defaultLocale)),
+        )
+        .slice(first, first + max + 1);
+
+      const results = await Promise.all(
+        selectedLocales.map((selectedLocale) =>
+          adminClient.realms.getRealmLocalizationTexts({
+            realm: realmName,
+            selectedLocale,
+          }),
+        ),
+      );
+
+      return results.map((result, index) => ({
+        locale: selectedLocales[index],
+        value: result[translationKey],
+      }));
     },
-    [],
+    (fetchedData) => {
+      setTranslations(fetchedData);
+      setupForm({ [translationKey]: fetchedData });
+    },
+    [combinedLocales, first, max, filter],
   );
-
-  const defaultSupportedLocales = useMemo(() => {
-    return realm?.supportedLocales!.length
-      ? realm.supportedLocales
-      : [DEFAULT_LOCALE];
-  }, [realm]);
-
-  const defaultLocales = useMemo(() => {
-    return realm?.defaultLocale!.length ? [realm.defaultLocale] : [];
-  }, [realm]);
-
-  const combinedLocales = useMemo(() => {
-    return Array.from(new Set([...defaultLocales, ...defaultSupportedLocales]));
-  }, [defaultLocales, defaultSupportedLocales]);
-
-  const filteredLocales = useMemo(() => {
-    return combinedLocales.filter((locale) =>
-      localeToDisplayName(locale, whoAmI.getLocale())!
-        .toLowerCase()
-        .includes(filter.toLowerCase()),
-    );
-  }, [combinedLocales, filter, whoAmI]);
-
-  useEffect(() => {
-    combinedLocales.forEach((locale, rowIndex) => {
-      setValue(`translations.${rowIndex}`, {
-        locale,
-        value: "",
-      });
-      setValue("key", translationKey);
-    });
-  }, [combinedLocales, translationKey, setValue]);
-
-  const handleOk = () => {
-    const formData = getValues();
-    onTranslationsAdded(formData);
-    toggleDialog();
-  };
 
   return (
     <Modal
@@ -132,9 +108,9 @@ export const AddTranslationsDialog = ({
           key="ok"
           data-testid="okTranslationBtn"
           variant="primary"
-          type="submit"
           form="add-translation"
           isDisabled={!isValid}
+          onClick={toggleDialog}
         >
           {t("addTranslationDialogOkBtn")}
         </Button>,
@@ -142,7 +118,10 @@ export const AddTranslationsDialog = ({
           key="cancel"
           data-testid="cancelTranslationBtn"
           variant="link"
-          onClick={onCancel}
+          onClick={() => {
+            setupForm({ [translationKey]: translations });
+            toggleDialog();
+          }}
         >
           {t("cancel")}
         </Button>,
@@ -155,134 +134,108 @@ export const AddTranslationsDialog = ({
         <FlexItem>
           <TextContent>
             <Text component={TextVariants.p}>
-              {t("addTranslationsModalSubTitle")}{" "}
+              {t("addTranslationsModalSubTitle", { fieldName })}
               <strong>{t("addTranslationsModalSubTitleBolded")}</strong>
             </Text>
           </TextContent>
         </FlexItem>
         <FlexItem>
-          <FormProvider {...form}>
-            <Form
-              id="add-translation"
-              data-testid="addTranslationForm"
-              onSubmit={handleSubmit(handleOk)}
-            >
-              <TextControl
-                name="key"
+          <Form id="add-translation" data-testid="addTranslationForm">
+            <FormGroup label={t("translationKey")} fieldId="translationKey">
+              <TextInput
+                id="translationKey"
                 label={t("translationKey")}
-                className="pf-u-mt-md"
                 data-testid="translation-key"
                 isDisabled
+                value={translationKey}
               />
-              <FlexItem>
-                <TextContent>
-                  <Text
-                    className="pf-u-font-size-sm pf-u-font-weight-bold"
-                    component={TextVariants.p}
-                  >
-                    {t("translationsTableHeading")}
-                  </Text>
-                </TextContent>
-                <PaginatingTableToolbar
-                  count={combinedLocales.length}
-                  first={first}
-                  max={max}
-                  onNextClick={setFirst}
-                  onPreviousClick={setFirst}
-                  onPerPageSelect={(first, max) => {
-                    setFirst(first);
-                    setMax(max);
-                  }}
-                  inputGroupName={"search"}
-                  inputGroupOnEnter={(search) => {
-                    setFilter(search);
-                    setFirst(0);
-                    setMax(10);
-                  }}
-                  inputGroupPlaceholder={t("searchForLanguage")}
+            </FormGroup>
+            <FlexItem>
+              <TextContent>
+                <Text
+                  className="pf-v5-u-font-size-sm pf-v5-u-font-weight-bold"
+                  component={TextVariants.p}
                 >
-                  {filteredLocales.length === 0 && !filter && (
-                    <ListEmptyState
-                      hasIcon
-                      message={t("noLanguages")}
-                      instructions={t("noLanguagesInstructions")}
-                    />
-                  )}
-                  {filteredLocales.length === 0 && filter && (
-                    <ListEmptyState
-                      hasIcon
-                      icon={SearchIcon}
-                      isSearchVariant
-                      message={t("noSearchResults")}
-                      instructions={t("noLanguagesSearchResultsInstructions")}
-                    />
-                  )}
-                  {filteredLocales.length !== 0 && (
-                    <Table
-                      aria-label={t("addTranslationsDialogRowsTable")}
-                      data-testid="add-translations-dialog-rows-table"
-                    >
-                      <Thead>
-                        <Tr>
-                          <Th className="pf-u-py-lg">
-                            {t("supportedLanguagesTableColumnName")}
-                          </Th>
-                          <Th className="pf-u-py-lg">
-                            {t("translationTableColumnName")}
-                          </Th>
-                          <Th aria-hidden="true" />
+                  {t("translationsTableHeading")}
+                </Text>
+              </TextContent>
+              <PaginatingTableToolbar
+                count={translations.length}
+                first={first}
+                max={max}
+                onNextClick={setFirst}
+                onPreviousClick={setFirst}
+                onPerPageSelect={(first, max) => {
+                  setFirst(first);
+                  setMax(max);
+                }}
+                inputGroupName={"search"}
+                inputGroupOnEnter={(search) => {
+                  setFilter(search);
+                  setFirst(0);
+                  setMax(10);
+                }}
+                inputGroupPlaceholder={t("searchForLanguage")}
+              >
+                {translations.length === 0 && filter && (
+                  <ListEmptyState
+                    hasIcon
+                    icon={SearchIcon}
+                    isSearchVariant
+                    message={t("noSearchResults")}
+                    instructions={t("noLanguagesSearchResultsInstructions")}
+                  />
+                )}
+                {translations.length !== 0 && (
+                  <Table
+                    aria-label={t("addTranslationsDialogRowsTable")}
+                    data-testid="add-translations-dialog-rows-table"
+                  >
+                    <Thead>
+                      <Tr>
+                        <Th className="pf-v5-u-py-lg">
+                          {t("supportedLanguagesTableColumnName")}
+                        </Th>
+                        <Th className="pf-v5-u-py-lg">
+                          {t("translationTableColumnName")}
+                        </Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {translations.slice(0, max).map((translation, index) => (
+                        <Tr key={index}>
+                          <Td dataLabel={t("supportedLanguage")}>
+                            {localeToDisplayName(
+                              translation.locale,
+                              whoAmI.getLocale(),
+                            )}
+                            {translation.locale === realm?.defaultLocale && (
+                              <Label className="pf-v5-u-ml-xs" color="blue">
+                                {t("defaultLanguage")}
+                              </Label>
+                            )}
+                          </Td>
+                          <Td>
+                            <TextInput
+                              id={`${prefix}.${index}.value`}
+                              data-testid={`translation-value-${index}`}
+                              {...register(`${prefix}.${index}.value`, {
+                                required: {
+                                  value:
+                                    translation.locale === realm?.defaultLocale,
+                                  message: t("required"),
+                                },
+                              })}
+                            />
+                          </Td>
                         </Tr>
-                      </Thead>
-                      <Tbody>
-                        {filteredLocales.map((locale, rowIndex) => (
-                          <Tr key={rowIndex}>
-                            <Td
-                              className="pf-m-sm pf-u-px-sm"
-                              dataLabel={t("supportedLanguage")}
-                            >
-                              <FormGroup fieldId="kc-supportedLanguage">
-                                {localeToDisplayName(
-                                  locale,
-                                  whoAmI.getLocale(),
-                                )}
-                                {locale === defaultLocales.toString() && (
-                                  <Label className="pf-u-ml-xs" color="blue">
-                                    {t("defaultLanguage")}
-                                  </Label>
-                                )}
-                              </FormGroup>
-                            </Td>
-                            <Td>
-                              {locale === defaultLocales.toString() && (
-                                <TextControl
-                                  name={`translations.${rowIndex}.value`}
-                                  label={t("translationValue")}
-                                  data-testid="translation-value"
-                                  rules={{
-                                    required: {
-                                      value: true,
-                                      message: t("required"),
-                                    },
-                                  }}
-                                />
-                              )}
-                              {locale !== defaultLocales.toString() && (
-                                <TextControl
-                                  name={`translations.${rowIndex}.value`}
-                                  label={t("translationValue")}
-                                  data-testid="translation-value"
-                                />
-                              )}
-                            </Td>
-                          </Tr>
-                        ))}
-                      </Tbody>
-                    </Table>
-                  )}
-                </PaginatingTableToolbar>
-              </FlexItem>
-            </Form>
-          </FormProvider>
+                      ))}
+                    </Tbody>
+                  </Table>
+                )}
+              </PaginatingTableToolbar>
+            </FlexItem>
+          </Form>
         </FlexItem>
       </Flex>
     </Modal>

@@ -1,13 +1,23 @@
 package org.keycloak.testsuite.broker;
 
 import org.apache.commons.lang3.StringUtils;
+import org.hamcrest.CoreMatchers;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Test;
+import org.keycloak.admin.client.resource.IdentityProviderResource;
 import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.models.FederatedIdentityModel;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.IdentityProviderSyncMode;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.representations.AccessTokenResponse;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.FederatedIdentityRepresentation;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.Assert;
+import org.keycloak.testsuite.broker.oidc.TestKeycloakOidcIdentityProviderFactory;
 import org.keycloak.testsuite.forms.RegisterWithUserProfileTest;
 import org.keycloak.testsuite.forms.VerifyProfileTest;
 import org.keycloak.testsuite.pages.LoginUpdateProfilePage;
@@ -15,18 +25,28 @@ import org.keycloak.testsuite.pages.RegisterPage;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.util.AccountHelper;
 import org.keycloak.testsuite.util.ClientScopeBuilder;
+import org.keycloak.util.JsonSerialization;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
+import org.openqa.selenium.WebElement;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.keycloak.testsuite.admin.ApiUtil.removeUserByUsername;
+import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_ALIAS;
+import static org.keycloak.testsuite.broker.BrokerTestTools.createIdentityProvider;
 import static org.keycloak.testsuite.broker.BrokerTestTools.waitForPage;
 import static org.keycloak.testsuite.forms.VerifyProfileTest.ATTRIBUTE_DEPARTMENT;
 import static org.keycloak.testsuite.forms.VerifyProfileTest.PERMISSIONS_ADMIN_EDITABLE;
 import static org.keycloak.testsuite.forms.VerifyProfileTest.PERMISSIONS_ALL;
+
+import java.util.List;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -44,7 +64,79 @@ public class KcOidcFirstBrokerLoginTest extends AbstractFirstBrokerLoginTest {
 
     @Override
     protected BrokerConfiguration getBrokerConfiguration() {
-        return KcOidcBrokerConfiguration.INSTANCE;
+        return new KcOidcBrokerConfiguration() {
+            @Override
+            public IdentityProviderRepresentation setUpIdentityProvider(IdentityProviderSyncMode syncMode) {
+                IdentityProviderRepresentation idp = createIdentityProvider(IDP_OIDC_ALIAS, TestKeycloakOidcIdentityProviderFactory.ID);
+                applyDefaultConfiguration(idp.getConfig(), syncMode);
+                return idp;
+            }
+        };
+    }
+
+    /**
+     * Tests the scenario where a OIDC IDP sends the refresh token only on first login (e.g. Google). In this case, subsequent
+     * logins that end up triggering the update of the federated user should not rewrite the token (access token response)
+     * without updating it first with the stored refresh token.
+     *
+     * Github issue reference: #25815
+     *
+     * @throws Exception if an error occurs while running the test.
+     */
+    @Test
+    public void testRefreshTokenSentOnlyOnFirstLogin() throws Exception {
+        IdentityProviderResource idp = realmsResouce().realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias());
+        IdentityProviderRepresentation representation = idp.toRepresentation();
+        representation.setStoreToken(true);
+        // enable refresh tokens only for the first login (test broker mimics behavior of idps that operate like this).
+        representation.getConfig().put(TestKeycloakOidcIdentityProviderFactory.USE_SINGLE_REFRESH_TOKEN, "true");
+        idp.update(representation);
+
+        // create a test user in the provider realm.
+        createUser(bc.providerRealmName(), "brucewayne", BrokerTestConstants.USER_PASSWORD, "Bruce", "Wayne", "brucewayne@gotham.com");
+
+        oauth.clientId("broker-app");
+        loginPage.open(bc.consumerRealmName());
+        logInWithIdp(bc.getIDPAlias(), "brucewayne", BrokerTestConstants.USER_PASSWORD);
+
+        // obtain the stored token from the federated identity.
+        String storedToken = testingClient.server(bc.consumerRealmName()).fetchString(session -> {
+            RealmModel realmModel = session.getContext().getRealm();
+            UserModel userModel = session.users().getUserByUsername(realmModel, "brucewayne");
+            FederatedIdentityModel fedIdentity = session.users().getFederatedIdentitiesStream(realmModel, userModel).findFirst().orElse(null);
+            return fedIdentity != null ? fedIdentity.getToken() : null;
+        });
+        assertThat(storedToken, not(nullValue()));
+
+        // convert the stored token into an access response for easier retrieval of both access and refresh tokens.
+        AccessTokenResponse tokenResponse = JsonSerialization.readValue(storedToken.substring(1, storedToken.length() - 1).replace("\\", ""), AccessTokenResponse.class);
+        String firstLoginAccessToken = tokenResponse.getToken();
+        assertThat(firstLoginAccessToken, not(nullValue()));
+        String firstLoginRefreshToken = tokenResponse.getRefreshToken();
+        assertThat(firstLoginRefreshToken, not(nullValue()));
+
+        // logout and then log back in.
+        AccountHelper.logout(adminClient.realm(bc.consumerRealmName()), "brucewayne");
+
+        loginPage.open(bc.consumerRealmName());
+        logInWithIdp(bc.getIDPAlias(), "brucewayne", BrokerTestConstants.USER_PASSWORD);
+
+        // fetch the stored token - access token should have been updated, but the refresh token should remain the same.
+        storedToken = testingClient.server(bc.consumerRealmName()).fetchString(session -> {
+            RealmModel realmModel = session.getContext().getRealm();
+            UserModel userModel = session.users().getUserByUsername(realmModel, "brucewayne");
+            FederatedIdentityModel fedIdentity = session.users().getFederatedIdentitiesStream(realmModel, userModel).findFirst().orElse(null);
+            return fedIdentity != null ? fedIdentity.getToken() : null;
+        });
+
+        tokenResponse = JsonSerialization.readValue(storedToken.substring(1, storedToken.length() - 1).replace("\\", ""), AccessTokenResponse.class);
+        String secondLoginAccessToken = tokenResponse.getToken();
+        assertThat(secondLoginAccessToken, not(nullValue()));
+        String secondLoginRefreshToken = tokenResponse.getRefreshToken();
+        assertThat(secondLoginRefreshToken, not(nullValue()));
+
+        assertThat(firstLoginAccessToken, not(equalTo(secondLoginAccessToken)));
+        assertThat(firstLoginRefreshToken, is(equalTo(secondLoginRefreshToken)));
     }
 
     /**
@@ -301,7 +393,7 @@ public class KcOidcFirstBrokerLoginTest extends AbstractFirstBrokerLoginTest {
         updateAccountInformationPage.assertCurrent();
 
         assertEquals("Please specify username.", loginUpdateProfilePage.getInputErrors().getUsernameError());
-        
+
         updateAccountInformationPage.updateAccountInformation("new-username", "no-first-name@localhost.com", "First Name", "Last Name");
 
         UserRepresentation userRepresentation = AccountHelper.getUserRepresentation(adminClient.realm(bc.consumerRealmName()), "new-username");
@@ -407,47 +499,21 @@ public class KcOidcFirstBrokerLoginTest extends AbstractFirstBrokerLoginTest {
         //assert fields location in form
         String htmlFormId = "kc-idp-review-profile-form";
 
-        //assert fields and groups location in form, attributes without a group are the last
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(1) > div:nth-child(1) > label#header-company")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(1) > div:nth-child(2) > label#description-company")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(2) > div:nth-child(2) > input#department")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(3) > div:nth-child(1) > label#header-contact")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(4) > div:nth-child(2) > input#email")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(5) > div:nth-child(2) > input#lastName")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(6) > div:nth-child(2) > input#username")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(7) > div:nth-child(2) > input#firstName")
-                ).isDisplayed()
-        );
+        //assert fields and groups location in form, attributes without a group appear first
+        List<WebElement> element = driver.findElements(By.cssSelector("form#kc-idp-review-profile-form label"));
+        String[] labelOrder = new String[]{"lastName", "username", "firstName", "header-company", "description-company", "department", "header-contact", "email"};
+        for (int i = 0; i < element.size(); i++) {
+            WebElement webElement = element.get(i);
+            String id;
+            if (webElement.getAttribute("for") != null) {
+                id = webElement.getAttribute("for");
+                // see that the label has an element it belongs to
+                assertThat("Label with id: " + id + " should have component it belongs to", driver.findElement(By.id(id)).isDisplayed(), is(true));
+            } else {
+                id = webElement.getAttribute("id");
+            }
+            assertThat("Label at index: " + i + " with id: " + id + " was not in found in the same order in the dom", labelOrder[i], is(id));
+        }
     }
 
     @Test
@@ -472,32 +538,13 @@ public class KcOidcFirstBrokerLoginTest extends AbstractFirstBrokerLoginTest {
         updateAccountInformationPage.assertCurrent();
 
         //assert fields location in form
-        String htmlFormId = "kc-idp-review-profile-form";
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(1) > div:nth-child(2) > input#lastName")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(2) > div:nth-child(2) > input#department")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(3) > div:nth-child(2) > input#username")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(4) > div:nth-child(2) > input#firstName")
-                ).isDisplayed()
-        );
-        org.junit.Assert.assertTrue(
-                driver.findElement(
-                        By.cssSelector("form#"+htmlFormId+" > div:nth-child(5) > div:nth-child(2) > input#email")
-                ).isDisplayed()
-        );
+        List<WebElement> element = driver.findElements(By.cssSelector("form#kc-idp-review-profile-form input"));
+        String[] labelOrder = new String[]{"lastName", "department", "username", "firstName", "email"};
+        for (int i = 0; i < labelOrder.length; i++) {
+            WebElement webElement = element.get(i);
+            String id = webElement.getAttribute("id");
+            assertThat("Field at index: " + i + " with id: " + id + " was not in found in the same order in the dom", id, is(labelOrder[i]));
+        }
     }
 
     @Test
@@ -595,7 +642,7 @@ public class KcOidcFirstBrokerLoginTest extends AbstractFirstBrokerLoginTest {
         waitForPage(driver, "update account information", false);
         updateAccountInformationPage.assertCurrent();
 
-        org.junit.Assert.assertFalse(updateAccountInformationPage.isDepartmentPresent());
+        assertFalse(updateAccountInformationPage.isDepartmentPresent());
 
         updateAccountInformationPage.updateAccountInformation( "requiredReadOnlyAttributeNotRenderedAndNotBlockingRegistration", "requiredReadOnlyAttributeNotRenderedAndNotBlockingRegistration@email", "FirstAA", "LastAA");
     }
@@ -710,13 +757,66 @@ public class KcOidcFirstBrokerLoginTest extends AbstractFirstBrokerLoginTest {
         waitForPage(driver, "update account information", false);
         updateAccountInformationPage.assertCurrent();
 
-        org.junit.Assert.assertFalse(updateAccountInformationPage.isDepartmentPresent());
+        assertFalse(updateAccountInformationPage.isDepartmentPresent());
         updateAccountInformationPage.updateAccountInformation( "attributeRequiredButNotSelectedByScopeIsNotRenderedAndNotBlockingRegistration", "attributeRequiredButNotSelectedByScopeIsNotRenderedAndNotBlockingRegistration@email", "FirstAA", "LastAA");
 
         UserRepresentation user = VerifyProfileTest.getUserByUsername(testRealm(),"attributeRequiredButNotSelectedByScopeIsNotRenderedAndNotBlockingRegistration");
         assertEquals("FirstAA", user.getFirstName());
         assertEquals("LastAA", user.getLastName());
         assertEquals(null, user.firstAttribute(ATTRIBUTE_DEPARTMENT));
+    }
+
+    @Test
+    public void testFederatedIdentityCaseSensitiveOriginalUsername() {
+        String expectedBrokeredUserName = "camelCase";
+        IdentityProviderResource idp = realmsResouce().realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias());
+        IdentityProviderRepresentation representation = idp.toRepresentation();
+        representation.getConfig().put(TestKeycloakOidcIdentityProviderFactory.PREFERRED_USERNAME, expectedBrokeredUserName);
+        representation.getConfig().put(IdentityProviderModel.CASE_SENSITIVE_ORIGINAL_USERNAME, Boolean.TRUE.toString());
+        idp.update(representation);
+        createUser(bc.providerRealmName(), expectedBrokeredUserName, BrokerTestConstants.USER_PASSWORD, "f", "l", "fl@example.org");
+
+        oauth.clientId("broker-app");
+        loginPage.open(bc.consumerRealmName());
+        // the username is stored as lower-case in the provider realm local database
+        logInWithIdp(bc.getIDPAlias(), expectedBrokeredUserName.toLowerCase(), BrokerTestConstants.USER_PASSWORD);
+
+        RealmResource realm = adminClient.realm(bc.consumerRealmName());
+        UserRepresentation userRepresentation = AccountHelper.getUserRepresentation(realm, expectedBrokeredUserName.toLowerCase());
+        // the username is in lower case in the local database
+        assertEquals(userRepresentation.getUsername(), expectedBrokeredUserName.toLowerCase());
+
+        // the original username is preserved
+        List<FederatedIdentityRepresentation> federatedIdentities = realm.users().get(userRepresentation.getId()).getFederatedIdentity();
+        assertFalse(federatedIdentities.isEmpty());
+        FederatedIdentityRepresentation federatedIdentity = federatedIdentities.get(0);
+        assertEquals(expectedBrokeredUserName, federatedIdentity.getUserName());
+    }
+
+    @Test
+    public void testFederatedIdentityCaseInsensitiveOriginalUsername() {
+        String expectedBrokeredUserName = "camelCase";
+        IdentityProviderResource idp = realmsResouce().realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias());
+        IdentityProviderRepresentation representation = idp.toRepresentation();
+        representation.getConfig().put(TestKeycloakOidcIdentityProviderFactory.PREFERRED_USERNAME, expectedBrokeredUserName);
+        idp.update(representation);
+        createUser(bc.providerRealmName(), expectedBrokeredUserName, BrokerTestConstants.USER_PASSWORD, "f", "l", "fl@example.org");
+
+        oauth.clientId("broker-app");
+        loginPage.open(bc.consumerRealmName());
+        // the username is stored as lower-case in the provider realm local database
+        logInWithIdp(bc.getIDPAlias(), expectedBrokeredUserName.toLowerCase(), BrokerTestConstants.USER_PASSWORD);
+
+        RealmResource realm = adminClient.realm(bc.consumerRealmName());
+        UserRepresentation userRepresentation = AccountHelper.getUserRepresentation(realm, expectedBrokeredUserName.toLowerCase());
+        // the username is in lower case in the local database
+        assertEquals(userRepresentation.getUsername(), expectedBrokeredUserName.toLowerCase());
+
+        // the original username is preserved
+        List<FederatedIdentityRepresentation> federatedIdentities = realm.users().get(userRepresentation.getId()).getFederatedIdentity();
+        assertFalse(federatedIdentities.isEmpty());
+        FederatedIdentityRepresentation federatedIdentity = federatedIdentities.get(0);
+        assertEquals(expectedBrokeredUserName.toLowerCase(), federatedIdentity.getUserName());
     }
 
     public void addDepartmentScopeIntoRealm() {

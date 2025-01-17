@@ -3,7 +3,11 @@ import { ExpandableSection } from "@patternfly/react-core";
 import { useState } from "react";
 import { useFormContext, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { SelectControl, TextAreaControl, TextControl } from "ui-shared";
+import {
+  SelectControl,
+  TextAreaControl,
+  TextControl,
+} from "@keycloak/keycloak-ui-shared";
 import { DefaultSwitchControl } from "../../components/SwitchControl";
 
 import "./discovery-settings.css";
@@ -32,7 +36,7 @@ const Fields = ({ readOnly }: DiscoverySettingsProps) => {
   });
 
   return (
-    <div className="pf-c-form pf-m-horizontal">
+    <div className="pf-v5-c-form pf-m-horizontal">
       <TextControl
         name="config.authorizationUrl"
         label={t("authorizationUrl")}
@@ -88,9 +92,9 @@ const Fields = ({ readOnly }: DiscoverySettingsProps) => {
             />
           ) : (
             <>
-              <TextControl
+              <TextAreaControl
                 name="config.publicKeySignatureVerifier"
-                label="validatingPublicKey"
+                label={t("validatingPublicKey")}
               />
               <TextControl
                 name="config.publicKeySignatureVerifierKeyId"
@@ -117,7 +121,7 @@ const Fields = ({ readOnly }: DiscoverySettingsProps) => {
           }}
           options={PKCE_METHODS.map((option) => ({
             key: option,
-            value: t(`${option}`),
+            value: t(option),
           }))}
         />
       )}

@@ -18,15 +18,16 @@ package org.keycloak.testsuite.i18n;
 
 import jakarta.ws.rs.core.Response;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.jboss.arquillian.graphene.page.Page;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
 import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
 import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient43Engine;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.keycloak.OAuth2Constants;
-import org.keycloak.adapters.HttpClientBuilder;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.cookie.CookieType;
@@ -83,6 +84,11 @@ public class LoginPageTest extends AbstractI18NTest {
     @Rule
     public AssertEvents events = new AssertEvents(this);
 
+    @Before
+    public void before() {
+        setRealmInternationalization(true);
+    }
+    
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
         testRealm.addIdentityProvider(IdentityProviderBuilder.create()
@@ -135,7 +141,7 @@ public class LoginPageTest extends AbstractI18NTest {
     }
 
     @Test
-    public void htmlLangAttribute() {
+    public void htmlLangAttributeWithInternationalizationEnabled() {
         loginPage.open();
         assertEquals("en", loginPage.getHtmlLanguage());
 
@@ -145,8 +151,16 @@ public class LoginPageTest extends AbstractI18NTest {
     }
 
     @Test
+    public void htmlLangAttributeWithInternationalizationDisabled() {
+        setRealmInternationalization(false);
+
+        loginPage.open();
+        assertEquals("en", loginPage.getHtmlLanguage());
+    }
+
+    @Test
     public void acceptLanguageHeader() throws IOException {
-        try(CloseableHttpClient httpClient = (CloseableHttpClient) new HttpClientBuilder().build()) {
+        try(CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
             ApacheHttpClient43Engine engine = new ApacheHttpClient43Engine(httpClient);
             ResteasyClient client = ((ResteasyClientBuilder) ResteasyClientBuilder.newBuilder()).httpEngine(engine).build();
 
@@ -351,7 +365,7 @@ public class LoginPageTest extends AbstractI18NTest {
 
         final String realmLocalizationMessageKey = "loginAccountTitle";
         final String realmLocalizationMessageValue = "Localization Test";
-        
+
         saveLocalizationText(locale, realmLocalizationMessageKey, realmLocalizationMessageValue);
         loginPage.open();
         assertThat(driver.getPageSource(), containsString(realmLocalizationMessageValue));
@@ -359,6 +373,20 @@ public class LoginPageTest extends AbstractI18NTest {
         testRealm().localization().deleteRealmLocalizationText(locale, realmLocalizationMessageKey);
         loginPage.open();
         assertThat(driver.getPageSource(), not(containsString(realmLocalizationMessageValue)));
+    }
+
+    @Test
+    public void realmLocalizationMessagesUsedDuringErrorHandling() {
+        final String locale = Locale.ENGLISH.toLanguageTag();
+
+        final String realmLocalizationMessageKey = "errorTitle";
+        final String realmLocalizationMessageValue = "We are really sorry...";
+
+        saveLocalizationText(locale, realmLocalizationMessageKey, realmLocalizationMessageValue);
+        String nonExistingUrl = oauth.getLoginFormUrl().split("protocol")[0] + "incorrect-path";
+        driver.navigate().to(nonExistingUrl);
+
+        assertThat(driver.getPageSource(), containsString(realmLocalizationMessageValue));
     }
 
     private void saveLocalizationText(String locale, String key, String value) {
@@ -380,5 +408,12 @@ public class LoginPageTest extends AbstractI18NTest {
         pageSource = driver.getPageSource();
         assertThat(pageSource, containsString(expectedEnglishMessage));
         assertThat(pageSource, not(containsString(expectedGermanMessage)));
+    }
+
+    private void setRealmInternationalization(final boolean enabled) {
+        final var realmResource = testRealm();
+        RealmRepresentation realm = realmResource.toRepresentation();
+        realm.setInternationalizationEnabled(enabled);
+        realmResource.update(realm);
     }
 }

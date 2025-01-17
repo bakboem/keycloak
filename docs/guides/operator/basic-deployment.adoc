@@ -52,11 +52,13 @@ spec:
     spec:
       containers:
         - name: postgresql-db
-          image: postgres:latest
+          image: postgres:15
           volumeMounts:
             - mountPath: /data
               name: cache-volume
           env:
+            - name: POSTGRES_USER
+              value: testuser
             - name: POSTGRES_PASSWORD
               value: testpassword
             - name: PGDATA
@@ -97,6 +99,10 @@ For development purposes, this {section} will use `test.keycloak.org`.
 When running on OpenShift, with ingress enabled, and with the spec.ingress.classname set to openshift-default, you may leave the spec.hostname.hostname unpopulated in the Keycloak CR.
 The operator will assign a default hostname to the stored version of the CR similar to what would be created by an OpenShift Route without an explicit host - that is ingress-namespace.appsDomain
 If the appsDomain changes, or should you need a different hostname for any reason, then update the Keycloak CR.
+
+NOTE: If you set the `hostname-admin`, or the deprecated `hostname-admin-url`, even if you enable ingress, no ingress will be created specifically for admin access. 
+Admin access via a separate hostname is generally expected to have access restrictions, which are not currently expressible via the Keycloak CR. 
+Also the default ingress does not prevent accessing admin endpoints, so you may not want to enable ingress handling via the Keycloak CR at all when you have a separate hostname for admin endpoints.       
 
 ==== TLS Certificate and key
 

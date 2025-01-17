@@ -69,10 +69,9 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.keycloak.util.BasicAuthHelper;
 import org.openqa.selenium.Cookie;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.LinkedList;
-
-import java.io.UnsupportedEncodingException;
 
 /**
  * @author <a href="mailto:h2-wada@nri.co.jp">Hiroyuki Wada</a>
@@ -448,7 +447,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
 
         Assert.assertEquals(400, tokenResponse.getStatusCode());
         Assert.assertEquals("invalid_grant", tokenResponse.getError());
-        Assert.assertEquals("PKCE verification failed", tokenResponse.getErrorDescription());
+        Assert.assertEquals("PKCE verification failed: Code mismatch", tokenResponse.getErrorDescription());
     }
 
 
@@ -1091,12 +1090,7 @@ public class OAuth2DeviceAuthorizationGrantTest extends AbstractKeycloakTest {
             parameters.add(new BasicNameValuePair(OAuth2Constants.SCOPE, "profile"));
             parameters.add(new BasicNameValuePair(OAuth2Constants.SCOPE, "foo"));
 
-            UrlEncodedFormEntity formEntity;
-            try {
-                formEntity = new UrlEncodedFormEntity(parameters, "UTF-8");
-            } catch (UnsupportedEncodingException e) {
-                throw new RuntimeException(e);
-            }
+            UrlEncodedFormEntity formEntity = new UrlEncodedFormEntity(parameters, StandardCharsets.UTF_8);
             post.setEntity(formEntity);
 
             return new OAuthClient.DeviceAuthorizationResponse(client.execute(post));

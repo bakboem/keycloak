@@ -155,7 +155,7 @@ If you use a custom theme to change these templates, they will function as expec
 However, we recommend you to take a look at how to configure a link:{adminguide_link}#user-profile[{declarative user profile}] and possibly avoid
 changing the built-in templates by using all the capabilities provided by this feature.
 
-Also, the templates used by the `declarative-user-profile` feature to render the pages for the same flows are longer necessary and removed in this release:
+Also, the templates used by the `declarative-user-profile` feature to render the pages for the same flows are no longer necessary and removed in this release:
 
 * `update-user-profile.ftl`
 * `register-user-profile.ftl`
@@ -182,6 +182,10 @@ to the new template.
 The `+spi-truststore-file-*+` options and the truststore related options `+https-trust-store-*+` are deprecated. Therefore, use the new default location for truststore material, `conf/truststores`, or specify your desired paths by using the `truststore-paths` option. For details, see the relevant https://www.keycloak.org/server/keycloak-truststore[guide].
 
 The `tls-hostname-verifier` property should be used instead of the `spi-truststore-file-hostname-verification-policy` property.
+
+A collateral effect of the changes is that now the truststore provider is always configured with some certificates (at least the default java trusted certificates are present). This new behavior can affect other parts of {project_name}.
+
+For example, *webauthn* registration can fail if *attestation conveyance* was configured to *Direct* validation. Previously, if the truststore provider was not configured the incoming certificate was not validated. But now this validation is always performed. The registration fails with `invalid cert path` error as the certificate chain sent by the dongle is not trusted by {project_name}. The Certificate Authorities of the authenticator need to be present in the truststore provider to correctly perform the attestation.
 
 = Deprecated `--proxy` option
 
@@ -309,6 +313,9 @@ This change adds new indexes on the tables `USER_ATTRIBUTE` and `FED_USER_ATTRIB
 If those tables contain more than 300000 entries, {project_name} will skip the index creation by default during the automatic schema migration and instead log the SQL statement on the console during migration to be applied manually after {project_name}'s startup.
 See the link:{upgradingguide_link}[{upgradingguide_name}] for details on how to configure a different limit.
 
+NOTE: The newly added indexes `USER_ATTR_LONG_VALUES_LOWER_CASE` and `FED_USER_ATTR_LONG_VALUES_LOWER_CASE` may exceed the maximum limit of 30 characters set by Oracle, 
+in case the database is running in compatibility mode. Since Oracle version 12.2, there is a support for longer index names.
+
 == Additional migration steps for LDAP
 
 This is for installations that match all the following criteria:
@@ -339,7 +346,7 @@ To be able to enable changing those attributes via UI and REST APIs,  perform th
 = The Admin send-verify-email API now uses the same email verification template
 
 ----
-PUT /admin/realms/{realm}/users/{id}/send-verify-email
+PUT /admin/realms/{realm-name}/users/{id}/send-verify-email
 ----
 
 In this release, the API will use the `email-verification.ftl` template instead of `executeActions.ftl`.
@@ -361,7 +368,7 @@ A new parameter called `lifespan` will be introduced to allow overriding of the 
 If you prefer the previous behavior, use the `execute-actions-email` API as follows.
 
 ----
-PUT /admin/realms/{realm}/users/{id}/execute-actions-email
+PUT /admin/realms/{realm-name}/users/{id}/execute-actions-email
 
 ["VERIFY_EMAIL"]
 ----
@@ -408,8 +415,9 @@ This can be done by configuring the hash iterations explicitly in the password p
 == Expected increased overall CPU usage and temporary increased database activity
 
 The Concepts for sizing CPU and memory resources in the {project_name} High Availability guide have been updated to reflect the new hashing defaults.
-While the CPU usage per password-based login in our tests increased by 33% (which includes both the changed password hashing and unchanged TLS connection handling), the overall CPU increase should be around 10% to 15%.
-This is due to the averaging effect of {project_name}'s other activities like refreshing access tokens and client credential grants, still this depends on the unique workload of an installation.
+The CPU usage per password-based login in our tests increased by the factor of five, which includes both the changed password hashing and unchanged TLS connection handling.
+The overall CPU increase should be around the factor of two to three due to the averaging effect of {project_name}'s other activities like refreshing access tokens and client credential grants.
+Still, this depends on the unique workload of an installation.
 
 After the upgrade, during a password-based login, the user's passwords will be re-hashed with the new hash algorithm and hash iterations as a one-off activity and updated in the database.
 As this clears the user from {project_name}'s internal cache, you will also see an increased read activity on the database level.
@@ -482,6 +490,17 @@ For custom extensions there may be some changes needed:
 = Internal algorithm changed from HS256 to HS512
 
 The algorithm that {project_name} uses to sign internal tokens (a JWT which is consumed by {project_name} itself, for example a refresh or action token) is being changed from `HS256` to the more secure `HS512`. A new key provider named `hmac-generated-hs512` is now added for realms. Note that in migrated realms the old `hmac-generated` provider and the old `HS256` key are maintained and still validate tokens issued before the upgrade. The `HS256` provider can be manually deleted when no more old tokens exist following the {adminguide_link}#rotating-keys[rotating keys guidelines].
+
+= Different JVM memory settings when running in a container
+
+The JVM options `-Xms` and `-Xmx` were replaced by `-XX:InitialRAMPercentage` and `-XX:MaxRAMPercentage` when running in a container.
+Instead of the static maximum heap size settings, {project_name} specifies the maximum as 70% of the total container memory.
+
+As the heap size is dynamically calculated based on the total container memory, you should *always set the memory limit* for the container.
+
+WARNING: If the memory limit is not set, the memory consumption rapidly increases as the maximum heap size grows up to 70% of the total container memory.
+
+For more details, see the https://www.keycloak.org/server/containers#_specifying_different_memory_settings[Running Keycloak in a container] guide.
 
 ifeval::[{project_community}==true]
 = GELF log handler has been deprecated

@@ -1,4 +1,3 @@
-import { v4 as uuid } from "uuid";
 import ListingPage from "../support/pages/admin-ui/ListingPage";
 import UserProfile from "../support/pages/admin-ui/manage/realm_settings/UserProfile";
 import Masthead from "../support/pages/admin-ui/Masthead";
@@ -9,7 +8,6 @@ import { keycloakBefore } from "../support/util/keycloak_hooks";
 import ModalUtils from "../support/util/ModalUtils";
 import RealmSettingsPage from "../support/pages/admin-ui/manage/realm_settings/RealmSettingsPage";
 import CreateUserPage from "../support/pages/admin-ui/manage/users/CreateUserPage";
-import { UserProfileConfig } from "@keycloak/keycloak-admin-client/lib/defs/userProfileMetadata";
 
 const loginPage = new LoginPage();
 const sidebarPage = new SidebarPage();
@@ -24,42 +22,22 @@ const createUserPage = new CreateUserPage();
 const getUserProfileTab = () => userProfileTab.goToTab();
 const getAttributesTab = () => userProfileTab.goToAttributesTab();
 const getAttributesGroupTab = () => userProfileTab.goToAttributesGroupTab();
-const getJsonEditorTab = () => userProfileTab.goToJsonEditorTab();
 
 const usernameAttributeName = "username";
 const emailAttributeName = "email";
 
-let defaultUserProfile: UserProfileConfig;
-
 describe("User profile tabs", () => {
-  const realmName = "Realm_" + uuid();
+  const realmName = "Realm_" + crypto.randomUUID();
   const attributeName = "Test";
   const attributeDisplayName = "Test display name";
 
-  before(() => {
-    cy.wrap(null).then(async () => {
-      await adminClient.createRealm(realmName);
+  before(() => adminClient.createRealm(realmName));
 
-      defaultUserProfile = await adminClient.getUserProfile(realmName);
-    });
-  });
-
-  after(() =>
-    cy.wrap(null).then(async () => await adminClient.deleteRealm(realmName)),
-  );
+  after(() => adminClient.deleteRealm(realmName));
 
   beforeEach(() => {
     loginPage.logIn();
     keycloakBefore();
-    cy.wrap(null).then(async () => {
-      await adminClient.updateUserProfile(realmName, defaultUserProfile);
-
-      await adminClient.updateRealm(realmName, {
-        registrationEmailAsUsername: false,
-        editUsernameAllowed: false,
-      });
-    });
-
     sidebarPage.goToRealm(realmName);
     sidebarPage.goToRealmSettings();
   });
@@ -92,11 +70,12 @@ describe("User profile tabs", () => {
     });
 
     it("Modifies existing attribute and performs save", () => {
+      const attrName = "ModifyTest";
       getUserProfileTab();
-      createAttributeDefinition(attributeName);
+      createAttributeDefinition(attrName);
 
       userProfileTab
-        .selectElementInList(attributeName)
+        .selectElementInList(attrName)
         .editAttribute("Edited display name")
         .saveAttributeCreation()
         .assertNotificationSaved();
@@ -104,7 +83,6 @@ describe("User profile tabs", () => {
 
     it("Adds and removes validator to/from existing attribute and performs save", () => {
       getUserProfileTab();
-      createAttributeDefinition(attributeName);
 
       userProfileTab
         .selectElementInList(attributeName)
@@ -121,45 +99,16 @@ describe("User profile tabs", () => {
   });
 
   describe("Attribute groups sub tab tests", () => {
-    it("Deletes an attributes group", () => {
-      const group = "Test";
-      cy.wrap(null).then(() =>
-        adminClient.patchUserProfile(realmName, {
-          groups: [{ name: group }],
-        }),
-      );
+    const group = "Test" + crypto.randomUUID();
 
+    before(() => adminClient.addGroupToProfile(realmName, group));
+
+    it("Deletes an attributes group", () => {
       getUserProfileTab();
       getAttributesGroupTab();
       listingPage.deleteItem(group);
       modalUtils.confirmModal();
-      listingPage.checkEmptyList();
-    });
-  });
-
-  describe("Json Editor sub tab tests", () => {
-    const removedThree = `
-      {ctrl+a}{backspace}
-  {
-    "attributes": [
-      {
-  "name": "${emailAttributeName}"{downArrow},
-      {
-  "name": "${usernameAttributeName}",
-  "validations": {
-    "length": {
-    "min": 3,
-  "max": 255 {downArrow},
-  "username-prohibited-characters": {
-  `;
-
-    it("Removes three validators with the editor", () => {
-      getUserProfileTab();
-      getJsonEditorTab();
-      userProfileTab.typeJSON(removedThree).saveJSON();
-      masthead.checkNotificationMessage(
-        "User profile settings successfully updated.",
-      );
+      listingPage.itemExist(group, false);
     });
   });
 
@@ -185,7 +134,7 @@ describe("User profile tabs", () => {
       createUserPage
         .goToCreateUser()
         .assertAttributeFieldExists(attrName, false)
-        .setUsername("testuser7")
+        .setUsername(`testuser7-${crypto.randomUUID()}`)
         .create()
         .assertNotificationCreated()
         .assertAttributeFieldExists(attrName, false);
@@ -218,7 +167,10 @@ describe("User profile tabs", () => {
       sidebarPage.goToUsers();
       createUserPage
         .goToCreateUser()
-        .setAttributeValue(emailAttributeName, "testuser8@gmail.com")
+        .setAttributeValue(
+          emailAttributeName,
+          `testuser8-${crypto.randomUUID()}@gmail.com`,
+        )
         .assertAttributeFieldExists(attrName, false)
         .create()
         .assertNotificationCreated();
@@ -226,9 +178,14 @@ describe("User profile tabs", () => {
       // Edit user
       createUserPage
         .assertAttributeFieldExists(attrName, false)
-        .setAttributeValue(emailAttributeName, "testuser9@gmail.com")
+        .setAttributeValue(
+          emailAttributeName,
+          `testuser9-${crypto.randomUUID()}@gmail.com`,
+        )
         .update()
         .assertNotificationUpdated();
+
+      deleteAttributeDefinition(attrName);
     });
 
     it("Checks that not required attribute with permissions to view/edit is present when user is created", () => {
@@ -243,7 +200,9 @@ describe("User profile tabs", () => {
       realmSettingsPage.goToLoginTab();
       cy.wait(1000);
       realmSettingsPage
+        .setSwitch(realmSettingsPage.emailAsUsernameSwitch, false)
         .assertSwitch(realmSettingsPage.emailAsUsernameSwitch, false)
+        .setSwitch(realmSettingsPage.editUsernameSwitch, false)
         .assertSwitch(realmSettingsPage.editUsernameSwitch, false);
 
       // Create user
@@ -251,10 +210,12 @@ describe("User profile tabs", () => {
       createUserPage
         .goToCreateUser()
         .assertAttributeFieldExists(attrName, true)
-        .setUsername("testuser10")
+        .setUsername(`testuser10-${crypto.randomUUID()}`)
         .create()
         .assertNotificationCreated()
         .assertAttributeFieldExists(attrName, true);
+
+      deleteAttributeDefinition(attrName);
     });
 
     it("Checks that required attribute with permissions to view/edit is present and required when user is created", () => {
@@ -270,7 +231,7 @@ describe("User profile tabs", () => {
       createUserPage
         .goToCreateUser()
         .assertAttributeLabel(attrName, attrName)
-        .setUsername("testuser11")
+        .setUsername(`testuser11-${crypto.randomUUID()}`)
         .create()
         .assertValidationErrorRequired(attrName);
 
@@ -278,6 +239,8 @@ describe("User profile tabs", () => {
         .setAttributeValue(attrName, "MyAttribute")
         .create()
         .assertNotificationCreated();
+
+      deleteAttributeDefinition(attrName);
     });
 
     it("Checks that required attribute with permissions to view/edit is accepted when user is created", () => {
@@ -293,10 +256,12 @@ describe("User profile tabs", () => {
       createUserPage
         .goToCreateUser()
         .assertAttributeLabel(attrName, attrName)
-        .setUsername("testuser12")
+        .setUsername(`testuser12-${crypto.randomUUID()}`)
         .setAttributeValue(attrName, "MyAttribute")
         .create()
         .assertNotificationCreated();
+
+      deleteAttributeDefinition(attrName);
     });
 
     it("Checks that attribute group is visible when user with existing attribute is created", () => {
@@ -306,7 +271,8 @@ describe("User profile tabs", () => {
       getAttributesGroupTab()
         .clickOnCreatesAttributesGroupButton()
         .createAttributeGroup(group, group)
-        .saveAttributesGroupCreation();
+        .saveAttributesGroupCreation()
+        .assertNotificationUpdated();
 
       getAttributesTab();
       userProfileTab
@@ -320,7 +286,7 @@ describe("User profile tabs", () => {
       createUserPage
         .goToCreateUser()
         .assertGroupDisplayName(group, group)
-        .setUsername("testuser14")
+        .setUsername(`testuser14-${crypto.randomUUID()}`)
         .create()
         .assertNotificationCreated();
 
@@ -342,7 +308,8 @@ describe("User profile tabs", () => {
       getAttributesGroupTab()
         .clickOnCreatesAttributesGroupButton()
         .createAttributeGroup(group, group)
-        .saveAttributesGroupCreation();
+        .saveAttributesGroupCreation()
+        .assertNotificationUpdated();
 
       createAttributeDefinition(attrName, (attrConfigurer) =>
         attrConfigurer.setAllAttributePermissions(),
@@ -361,7 +328,7 @@ describe("User profile tabs", () => {
         .goToCreateUser()
         .assertGroupDisplayName(group, group)
         .assertAttributeLabel(attrName, attrName)
-        .setUsername("testuser13")
+        .setUsername(`testuser13-${crypto.randomUUID()}`)
         .setAttributeValue(attrName, initialAttrValue)
         .create()
         .assertNotificationCreated()
@@ -383,10 +350,12 @@ describe("User profile tabs", () => {
         .resetAttributeGroup()
         .saveAttributeCreation()
         .assertNotificationSaved();
+
+      deleteAttributeDefinition(attrName);
     });
 
     it("Checks that attribute with select-annotation is displayed and editable when user is created/edited", () => {
-      const userName = `select-test-user-${uuid()}`;
+      const userName = `select-test-user-${crypto.randomUUID()}`;
       const attrName = "select-test-attr";
       const opt1 = "opt1";
       const opt2 = "opt2";
@@ -407,7 +376,7 @@ describe("User profile tabs", () => {
       createUserPage
         .goToCreateUser()
         .assertAttributeLabel(attrName, attrName)
-        .assertAttributeSelect(attrName, supportedOptions, "")
+        .assertAttributeSelect(attrName, supportedOptions, "Select an option")
         .setUsername(userName)
         .setAttributeValueOnSelect(attrName, opt1)
         .create()
@@ -424,6 +393,15 @@ describe("User profile tabs", () => {
         .assertAttributeSelect(attrName, supportedOptions, opt2);
     });
   });
+
+  function deleteAttributeDefinition(attrName: string) {
+    sidebarPage.goToRealmSettings();
+    getUserProfileTab();
+    getAttributesTab();
+    listingPage.deleteItem(attrName);
+    modalUtils.confirmModal();
+    masthead.checkNotificationMessage("Attribute deleted");
+  }
 
   function createAttributeDefinition(
     attrName: string,

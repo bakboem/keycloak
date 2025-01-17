@@ -17,11 +17,6 @@
 
 package org.keycloak.models.sessions.infinispan.remotestore;
 
-import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
 import org.infinispan.Cache;
 import org.infinispan.client.hotrod.MetadataValue;
 import org.infinispan.client.hotrod.RemoteCache;
@@ -32,14 +27,16 @@ import org.keycloak.common.util.Retry;
 import org.keycloak.connections.infinispan.DefaultInfinispanConnectionProviderFactory;
 import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.sessions.infinispan.initializer.BaseCacheInitializer;
-import org.keycloak.models.sessions.infinispan.initializer.OfflinePersistentUserSessionLoader;
 import org.keycloak.models.sessions.infinispan.initializer.SessionLoader;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-public class RemoteCacheSessionsLoader implements SessionLoader<RemoteCacheSessionsLoaderContext, SessionLoader.WorkerContext, SessionLoader.WorkerResult>, Serializable {
+public class RemoteCacheSessionsLoader implements SessionLoader<RemoteCacheSessionsLoaderContext, SessionLoader.WorkerContext, SessionLoader.WorkerResult> {
 
     private static final Logger log = Logger.getLogger(RemoteCacheSessionsLoader.class);
 
@@ -53,26 +50,16 @@ public class RemoteCacheSessionsLoader implements SessionLoader<RemoteCacheSessi
 
 
     @Override
-    public void init(KeycloakSession session) {
-    }
-
-
-    @Override
-    public RemoteCacheSessionsLoaderContext computeLoaderContext(KeycloakSession session) {
+    public RemoteCacheSessionsLoaderContext computeLoaderContext() {
         return new RemoteCacheSessionsLoaderContext(sessionsPerSegment);
 
     }
 
     @Override
-    public WorkerContext computeWorkerContext(RemoteCacheSessionsLoaderContext loaderCtx, int segment, int workerId, WorkerResult previousResult) {
-        return new WorkerContext(segment, workerId);
+    public WorkerContext computeWorkerContext(int segment) {
+        return new WorkerContext(segment);
     }
 
-
-    @Override
-    public WorkerResult createFailedWorkerResult(RemoteCacheSessionsLoaderContext loaderContext, WorkerContext workerContext) {
-        return new WorkerResult(false, workerContext.getSegment(), workerContext.getWorkerId());
-    }
 
     @Override
     public WorkerResult loadSessions(KeycloakSession session, RemoteCacheSessionsLoaderContext loaderContext, WorkerContext ctx) {
@@ -143,13 +130,13 @@ public class RemoteCacheSessionsLoader implements SessionLoader<RemoteCacheSessi
                 insertSessions(decoratedCache, toInsertImmortal, maxIdleImmortal, -1);
             }
         } catch (RuntimeException e) {
-            log.warnf(e, "Error loading sessions from remote cache '%s' for segment '%d'", remoteCache.getName(), ctx.getSegment());
+            log.warnf(e, "Error loading sessions from remote cache '%s' for segment '%d'", remoteCache.getName(), ctx.segment());
             throw e;
         }
 
-        log.debugf("Successfully finished loading sessions from cache '%s' . Segment: %d, Count of sessions loaded: %d", cache.getName(), ctx.getSegment(), countLoaded);
+        log.debugf("Successfully finished loading sessions from cache '%s' . Segment: %d, Count of sessions loaded: %d", cache.getName(), ctx.segment(), countLoaded);
 
-        return new WorkerResult(true, ctx.getSegment(), ctx.getWorkerId());
+        return new WorkerResult(true, ctx.segment());
     }
 
     private void insertSessions(Cache<Object, Object> cache, Map<Object, Object> entries, int maxIdle, int lifespan) {
@@ -170,27 +157,7 @@ public class RemoteCacheSessionsLoader implements SessionLoader<RemoteCacheSessi
     }
 
     @Override
-    public boolean isFinished(BaseCacheInitializer initializer) {
-        Cache<String, Serializable> workCache = initializer.getWorkCache();
-
-        // Check if persistent sessions were already loaded in this DC. This is possible just for offline sessions ATM
-        Boolean sessionsLoaded = (Boolean) workCache
-                .getAdvancedCache().withFlags(Flag.SKIP_CACHE_LOAD, Flag.SKIP_CACHE_STORE)
-                .get(OfflinePersistentUserSessionLoader.PERSISTENT_SESSIONS_LOADED_IN_CURRENT_DC);
-
-        if ((cacheName.equals(InfinispanConnectionProvider.OFFLINE_USER_SESSION_CACHE_NAME) || (cacheName.equals(InfinispanConnectionProvider.OFFLINE_CLIENT_SESSION_CACHE_NAME)))
-                && sessionsLoaded != null && sessionsLoaded) {
-            log.debugf("Sessions already loaded in current DC. Skip sessions loading from remote cache '%s'", cacheName);
-            return true;
-        } else {
-            log.debugf("Sessions maybe not yet loaded in current DC. Will load them from remote cache '%s'", cacheName);
-            return false;
-        }
-    }
-
-
-    @Override
-    public void afterAllSessionsLoaded(BaseCacheInitializer initializer) {
+    public void afterAllSessionsLoaded() {
     }
 
 

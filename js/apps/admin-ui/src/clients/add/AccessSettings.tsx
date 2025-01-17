@@ -1,6 +1,6 @@
 import { useFormContext } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { TextControl } from "ui-shared";
+import { TextControl } from "@keycloak/keycloak-ui-shared";
 
 import { FixedButtonsGroup } from "../../components/form/FixedButtonGroup";
 import { FormAccess } from "../../components/form/FormAccess";
@@ -42,7 +42,7 @@ export const AccessSettings = ({
           name="settings"
           save={save}
           reset={reset}
-          isActive={!isManager}
+          isDisabled={isManager}
         />
       )}
     </FormAccess>

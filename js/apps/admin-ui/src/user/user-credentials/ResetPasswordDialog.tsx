@@ -5,18 +5,17 @@ import {
   ButtonVariant,
   Form,
   FormGroup,
-  ValidatedOptions,
 } from "@patternfly/react-core";
 import { FormProvider, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { adminClient } from "../../admin-client";
+import { FormErrorText, PasswordInput } from "@keycloak/keycloak-ui-shared";
+import { useAdminClient } from "../../admin-client";
 import { DefaultSwitchControl } from "../../components/SwitchControl";
-import { useAlerts } from "../../components/alert/Alerts";
+import { useAlerts } from "@keycloak/keycloak-ui-shared";
 import {
   ConfirmDialogModal,
   useConfirmDialog,
 } from "../../components/confirm-dialog/ConfirmDialog";
-import { PasswordInput } from "../../components/password-input/PasswordInput";
 import useToggle from "../../utils/useToggle";
 
 type ResetPasswordDialogProps = {
@@ -46,6 +45,8 @@ export const ResetPasswordDialog = ({
   refresh,
   onClose,
 }: ResetPasswordDialogProps) => {
+  const { adminClient } = useAdminClient();
+
   const { t } = useTranslation();
   const form = useForm<CredentialsForm>({
     defaultValues: credFormDefaultValues,
@@ -148,12 +149,6 @@ export const ResetPasswordDialog = ({
             name="password"
             label={t("password")}
             fieldId="password"
-            helperTextInvalid={t("required")}
-            validated={
-              errors.password
-                ? ValidatedOptions.error
-                : ValidatedOptions.default
-            }
             isRequired
           >
             <PasswordInput
@@ -171,6 +166,7 @@ export const ResetPasswordDialog = ({
               }}
               {...rest}
             />
+            {errors.password && <FormErrorText message={t("required")} />}
           </FormGroup>
           <FormGroup
             name="passwordConfirmation"
@@ -180,12 +176,6 @@ export const ResetPasswordDialog = ({
                 : t("passwordConfirmation")
             }
             fieldId="passwordConfirmation"
-            helperTextInvalid={errors.passwordConfirmation?.message}
-            validated={
-              errors.passwordConfirmation
-                ? ValidatedOptions.error
-                : ValidatedOptions.default
-            }
             isRequired
           >
             <PasswordInput
@@ -198,12 +188,18 @@ export const ResetPasswordDialog = ({
                   t("confirmPasswordDoesNotMatch").toString(),
               })}
             />
+            {errors.passwordConfirmation && (
+              <FormErrorText
+                message={errors.passwordConfirmation.message as string}
+              />
+            )}
           </FormGroup>
           <FormProvider {...form}>
             <DefaultSwitchControl
               name="temporaryPassword"
               label={t("temporaryPassword")}
               labelIcon={t("temporaryPasswordHelpText")}
+              className="pf-v5-u-mb-md"
               defaultValue="true"
             />
           </FormProvider>

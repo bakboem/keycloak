@@ -18,11 +18,11 @@
 package org.keycloak.authentication.forms;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.base.Strings;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -38,6 +38,7 @@ import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.util.JsonSerialization;
+import org.keycloak.utils.StringUtil;
 
 public class RegistrationRecaptcha extends AbstractRegistrationRecaptcha {
 
@@ -67,7 +68,7 @@ public class RegistrationRecaptcha extends AbstractRegistrationRecaptcha {
 
     @Override
     protected boolean validateConfig(Map<String, String> config) {
-        return !(Strings.isNullOrEmpty(config.get(SITE_KEY)) || Strings.isNullOrEmpty(config.get(SECRET_KEY)));
+        return !(StringUtil.isNullOrEmpty(config.get(SITE_KEY)) || StringUtil.isNullOrEmpty(config.get(SECRET_KEY)));
     }
 
     @Override
@@ -82,7 +83,7 @@ public class RegistrationRecaptcha extends AbstractRegistrationRecaptcha {
         formparams.add(new BasicNameValuePair("remoteip", context.getConnection().getRemoteAddr()));
 
         try {
-            UrlEncodedFormEntity form = new UrlEncodedFormEntity(formparams, "UTF-8");
+            UrlEncodedFormEntity form = new UrlEncodedFormEntity(formparams, StandardCharsets.UTF_8);
             post.setEntity(form);
             try (CloseableHttpResponse response = httpClient.execute(post)) {
                 InputStream content = response.getEntity().getContent();

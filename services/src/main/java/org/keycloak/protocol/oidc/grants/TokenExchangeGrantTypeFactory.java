@@ -43,8 +43,11 @@ public class TokenExchangeGrantTypeFactory implements OAuth2GrantTypeFactory, En
     }
 
     @Override
-    public boolean isSupported() {
-        return Profile.isFeatureEnabled(Profile.Feature.TOKEN_EXCHANGE);
+    public boolean isSupported(Config.Scope config) {
+        return     Profile.isFeatureEnabled(Profile.Feature.TOKEN_EXCHANGE)
+                || Profile.isFeatureEnabled(Profile.Feature.TOKEN_EXCHANGE_STANDARD_V2)
+                || Profile.isFeatureEnabled(Profile.Feature.TOKEN_EXCHANGE_FEDERATED_V2)
+                || Profile.isFeatureEnabled(Profile.Feature.TOKEN_EXCHANGE_SUBJECT_IMPERSONATION_V2);
     }
 
     @Override
